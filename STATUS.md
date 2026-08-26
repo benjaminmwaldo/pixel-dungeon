@@ -1,47 +1,60 @@
-# Status — The Sunken Crypt
+# Status — Pixel Dungeon (real-time co-op)
 
-**As of 2026-08-26: playable and complete, start to finish.**
+**As of 2026-08-26: playable start to finish.**
 
-Built in one session: a real-time 1–4 player Zelda-1-style dungeon crawler,
-zero dependencies, all art and music original.
+Rebuilt from the earlier room-based Zelda-style game into a real-time
+*Pixel Dungeon*: procedurally generated floors, a scrolling camera over the
+whole level, fog of war, and twenty-five floors in five themed chapters.
 
 ## What works (verified)
 
-- **Server-authoritative multiplayer** at 30 Hz over a from-scratch WebSocket
-  implementation. Party codes, up to 4 heroes, lobby with ready-up, live join,
-  clean disconnect. Verified by `scripts/net-test.js` (14 checks).
-- **Client prediction + reconciliation** for the local hero, entity
-  interpolation for everyone else. ~220-byte snapshots.
-- **Per-player cameras** — heroes in different rooms each see their own room;
-  the minimap shows where everyone is.
-- **The full dungeon**: 20 hand-built rooms, 2 key doors, 1 skull door, 1
-  bombable wall, 1 push-block secret, 8 enemy types, a boss, and a win screen.
-- **Combat**: sword with a full-hearts beam, bombs, boomerang, knockback,
-  mercy frames, armoured enemies that must be flanked, room-clear shutters.
-- **Co-op down/revive**, shared party inventory, private hearts.
-- **All art hand-authored** — 80 sprites + an 8×8 font, validated by
-  `scripts/validate-art.js`.
-- **Original chip audio** — dungeon and boss loops plus ~30 effects.
+- **Procedural floors.** 32x32, rooms carved by binary splitting, connected by
+  doors on shared walls, leftover rooms painted as corridors. Special rooms in
+  dead ends; a locked vault whose iron key is elsewhere on the floor.
+  `scripts/levelgen-test.js` generates 1000 floors and proves the stairs down
+  are always reachable and nothing is stranded.
+- **Five chapters, five floors each, a boss on every fifth** — sewers, prison,
+  caves, metropolis, demon halls. The way down is sealed until the boss falls.
+- **Fog of war.** Recursive shadowcasting at radius 8, plus the whole-room
+  reveal. Remembered ground is drawn dim; unseen ground is black. Monsters are
+  filtered out of the snapshot server-side, so the fog is real, not painted on.
+- **Four classes** with different hit points, speed, sight and abilities.
+- **Real-time co-op** at 30 Hz, server-authoritative, with prediction, input
+  queueing and entity interpolation. Per-player floors and cameras; the party
+  shares its explored map, its gold and what it has identified.
+- **Roguelike systems**: XP and levels, hunger, unidentified potions and
+  scrolls whose appearances shuffle per run, upgradeable weapons and armour,
+  iron keys, traps, wells, pedestals, chasms, water that slows you, high grass
+  that blocks sight until you cut it.
+- **All art hand-authored** — 148 sprites plus an 8x8 font, one tileset baked
+  in five palettes, five 32x32 bosses generated from shape primitives.
+- **Original chip audio** — a loop per chapter plus a boss theme.
 
 ## Notes for future work
 
-- Difficulty is faithful to the original, which means unforgiving: 3 hearts at
-  the start and enemies that converge. Worth playtesting with real people
-  before tuning.
-- Only one dungeon level exists. `shared/dungeon.js` is pure data — a second
-  level is a new ASCII room list and a new `LINKS` array, nothing else.
-- No persistence: closing the tab ends the run. A save would mean serialising
-  `Game.party` + per-room `opened/cleared/itemTaken` flags.
-- The `--dev` capture endpoint is for art review only; leave it off in any
-  public deployment.
+- Difficulty is not yet playtested with real people. Contact damage, mercy
+  frames and mob density were tuned against an automated player, which fights
+  worse than a human and explores better.
+- Ranged classes have not been played through a full run; the warrior has.
+- No persistence: closing the tab ends the run.
+- Special rooms are decorated but their contents are still mostly generic loot;
+  libraries could guarantee scrolls, gardens could hide a seed cache.
+- The old Zelda-style hand-built dungeon is gone (`shared/dungeon.js` and the
+  room-transition code were deleted, not kept in parallel).
 
 ## Bugs found and fixed along the way
 
-- The RFC 6455 magic GUID was wrong from memory (`…-5AB0DC85B11F` instead of
-  `…-C5AB0DC85B11`), so browsers refused every handshake. Recovered the real
-  one out of the Node binary with `grep -a`.
-- The server sampled only the newest input frame, so a one-tick sword press
-  could be dropped entirely. It now queues input frames.
-- Prediction replay did not restore per-frame button state, so replayed
-  attacks were swallowed by edge detection.
-- Bombs damaged the hero who set them; in the original they never do.
+- **Doorways reported the wrong blocker.** Meeting a one-tile doorway at an
+  angle made the collider report the wall beside the door, so the "walk into a
+  door to open it" rule never fired and the hero was stuck against the frame
+  forever. The collider now reports a door in preference to a wall. This one
+  only showed up when an automated player tried to cross a whole floor.
+- Room graph could strand a room whose only shared walls were too short for a
+  door; connection now repeats until every room attaches to the connected set,
+  and every placement (stairs, keys, traps, spawns) is validated against a real
+  flood fill rather than trusting the graph.
+- Boss floors reported their sealed exit as unreachable to the test harness;
+  a locked stair is now "found but not passed" rather than skipped.
+- Encounters were far too rare in real time — monsters only noticed you on
+  line of sight. They now hear you within six tiles, and floors carry more
+  monsters and more loot.

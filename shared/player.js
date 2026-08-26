@@ -1,47 +1,66 @@
-// The player's own motion. Run identically by the server (authoritative) and
-// by the client (prediction), so the two only ever differ by unacked input.
+// The hero's own motion, run identically by the server and by the client's
+// prediction. Anything that decides an outcome (damage, loot, doors) lives on
+// the server; this only moves the body and runs the swing timer.
 
-import {
-  IN, N, E, S, W, PLAYER_SPEED, PLAYER_BOX, ATTACK_TICKS,
-} from './constants.js';
-import { moveActor, MODE } from './physics.js';
+import { IN, N, E, S, W, PLAYER_BOX, ATTACK_TICKS, CLASSES } from './constants.js';
+import { moveActor, MODE, tileUnder, terrainFactor } from './physics.js';
 
 export function newPlayerState() {
   return {
-    x: 120, y: 140, dir: S,
-    atk: 0,          // sword-out countdown
+    x: 0, y: 0, dir: S,
+    atk: 0,
     knockT: 0, knockX: 0, knockY: 0,
-    trans: 0,        // room-transition freeze
-    walk: 0,         // animation phase
-    prev: 0,         // previous input bits, for edge detection
-    ghost: false,
     stun: 0,
+    walk: 0,
+    prev: 0,
+    ghost: false,
+    abilityCd: 0,
+    guarding: false,
   };
 }
 
 /**
- * Advance one tick. Returns the events the caller may want to act on.
- * `bits` is the input bitmask for this tick.
+ * Advance one tick. `bits` is this frame's input.
+ * Returns what the caller may need to act on.
  */
-export function playerStep(p, bits, tiles, doorState) {
-  const ev = { attacked: false, useItem: false, moved: false };
+export function playerStep(p, bits, tiles, cls) {
+  const ev = { attacked: false, ability: false, moved: false, blockedBy: -1 };
   const pressed = bits & ~p.prev;
   p.prev = bits;
 
-  if (p.trans > 0) { p.trans--; return ev; }
+  if (p.abilityCd > 0) p.abilityCd--;
+  p.guarding = false;
+
   if (p.stun > 0) { p.stun--; return ev; }
 
   if (p.knockT > 0) {
     p.knockT--;
-    moveActor(p, p.knockX, p.knockY, tiles, doorState, PLAYER_BOX, MODE.WALK, false);
+    moveActor(p, p.knockX, p.knockY, tiles, PLAYER_BOX, MODE.WALK, false);
     return ev;
   }
 
   if (p.atk > 0) { p.atk--; return ev; }
 
+  const def = CLASSES[cls] || CLASSES.warrior;
+
   if (!p.ghost) {
     if (pressed & IN.A) { p.atk = ATTACK_TICKS; ev.attacked = true; return ev; }
-    if (pressed & IN.B) { ev.useItem = true; }
+    if (bits & IN.B) {
+      if (def.ranged) {
+        if (p.abilityCd <= 0) {
+          p.abilityCd = def.ranged.cd;
+          p.atk = 5;
+          ev.ability = true;
+          return ev;
+        }
+      } else if (cls === 'warrior') {
+        // hold to brace: slower, but blows glance off
+        p.guarding = true;
+      } else if (cls === 'rogue' && (pressed & IN.B) && p.abilityCd <= 0) {
+        p.abilityCd = 240;
+        ev.ability = true;
+      }
+    }
   }
 
   let dx = 0, dy = 0;
@@ -50,14 +69,19 @@ export function playerStep(p, bits, tiles, doorState) {
   if (bits & IN.UP) dy = -1;
   if (bits & IN.DOWN) dy = 1;
 
-  // Four-way only, like the original: keep the axis you are already facing.
+  // Four-way only: keep the axis you are already facing.
   if (dx !== 0 && dy !== 0) {
     if (p.dir === N || p.dir === S) dx = 0; else dy = 0;
   }
 
   if (dx !== 0 || dy !== 0) {
     p.dir = dx < 0 ? W : dx > 0 ? E : dy < 0 ? N : S;
-    moveActor(p, dx * PLAYER_SPEED, dy * PLAYER_SPEED, tiles, doorState, PLAYER_BOX, MODE.WALK, true);
+    const under = tiles[tileUnder(p, PLAYER_BOX)];
+    let speed = (p.ghost ? 2.6 : def.speed) * terrainFactor(under);
+    if (p.guarding) speed *= 0.45;
+    const r = moveActor(p, dx * speed, dy * speed, tiles,
+      PLAYER_BOX, p.ghost ? MODE.FLY : MODE.WALK, true);
+    ev.blockedBy = r.blockedBy;
     p.walk = (p.walk + 1) % 16;
     ev.moved = true;
   } else {
@@ -66,16 +90,16 @@ export function playerStep(p, bits, tiles, doorState) {
   return ev;
 }
 
-/** The sword's hitbox for the current swing, or null. */
-export function swordBox(p) {
+/** The swing's hitbox for this frame, or null. */
+export function meleeBox(p, reach = 18) {
   if (p.atk <= 0 || p.ghost) return null;
-  // The blade only counts for the first part of the swing.
   if (p.atk < ATTACK_TICKS - 6) return null;
   const cx = p.x + 8, cy = p.y + 8;
+  const half = 7;
   switch (p.dir) {
-    case N: return { x: cx - 5, y: cy - 20, w: 10, h: 18 };
-    case S: return { x: cx - 5, y: cy + 2, w: 10, h: 18 };
-    case E: return { x: cx + 2, y: cy - 5, w: 18, h: 10 };
-    default: return { x: cx - 20, y: cy - 5, w: 18, h: 10 };
+    case N: return { x: cx - half, y: cy - reach, w: half * 2, h: reach - 2 };
+    case S: return { x: cx - half, y: cy + 2, w: half * 2, h: reach - 2 };
+    case E: return { x: cx + 2, y: cy - half, w: reach - 2, h: half * 2 };
+    default: return { x: cx - reach, y: cy - half, w: reach - 2, h: half * 2 };
   }
 }

@@ -1,0 +1,147 @@
+// Loot. Potions and scrolls arrive unidentified: each run shuffles which
+// colour of glass and which rune goes with which effect, and the party only
+// learns by drinking, reading, or finding a scroll of identify.
+
+import { rngFor } from './terrain.js';
+
+export const ITEM = {
+  GOLD: 'gold', FOOD: 'food', POTION: 'potion', SCROLL: 'scroll',
+  WEAPON: 'weapon', ARMOR: 'armor', KEY: 'key', GOLDKEY: 'goldkey',
+  BOMB: 'bomb', RELIC: 'relic',
+};
+
+export const POTION = {
+  HEALING: 'healing', STRENGTH: 'strength', HASTE: 'haste', INVIS: 'invis',
+  FIRE: 'fire', FROST: 'frost', MIGHT: 'might', TOXIC: 'toxic', PARALYSIS: 'paralysis',
+};
+export const POTION_KINDS = Object.values(POTION);
+
+export const SCROLL = {
+  UPGRADE: 'upgrade', IDENTIFY: 'identify', MAPPING: 'mapping',
+  TELEPORT: 'teleport', TERROR: 'terror', RECHARGE: 'recharge', RAGE: 'rage',
+};
+export const SCROLL_KINDS = Object.values(SCROLL);
+
+const POTION_LOOKS = ['CRIMSON', 'AZURE', 'GOLDEN', 'IVORY', 'JADE', 'AMBER', 'INDIGO', 'SILVER', 'ROSE'];
+const SCROLL_LOOKS = ['KAUNAN', 'SOWILO', 'LAGUZ', 'YNGVI', 'GYFU', 'RAIDO', 'ISAZ'];
+
+// The tint each glass colour is drawn in.
+export const POTION_TINT = {
+  CRIMSON: '#F83800', AZURE: '#0078F8', GOLDEN: '#F8B800', IVORY: '#FCFCFC',
+  JADE: '#00A800', AMBER: '#FC9838', INDIGO: '#6844FC', SILVER: '#BCBCBC', ROSE: '#F878F8',
+};
+
+export const WEAPONS = [
+  { name: 'SHORT SWORD', dmg: 2, tier: 1 },
+  { name: 'MACE', dmg: 4, tier: 2 },
+  { name: 'SABRE', dmg: 6, tier: 3 },
+  { name: 'WAR HAMMER', dmg: 8, tier: 4 },
+  { name: 'GLAIVE', dmg: 11, tier: 5 },
+];
+
+export const ARMORS = [
+  { name: 'CLOTH ARMOR', def: 0, tier: 1 },
+  { name: 'LEATHER ARMOR', def: 2, tier: 2 },
+  { name: 'MAIL ARMOR', def: 4, tier: 3 },
+  { name: 'SCALE ARMOR', def: 6, tier: 4 },
+  { name: 'PLATE ARMOR', def: 9, tier: 5 },
+];
+
+/** Shuffle the appearances for one run. */
+export function makeAppearances(seed) {
+  const rng = rngFor((seed ^ 0x5bf03635) >>> 0);
+  const pots = rng.shuffle(POTION_LOOKS.slice());
+  const scrs = rng.shuffle(SCROLL_LOOKS.slice());
+  const potionLook = {}, scrollLook = {};
+  POTION_KINDS.forEach((k, i) => { potionLook[k] = pots[i % pots.length]; });
+  SCROLL_KINDS.forEach((k, i) => { scrollLook[k] = scrs[i % scrs.length]; });
+  return { potionLook, scrollLook };
+}
+
+/** What the party should see this item called, given what they have learned. */
+export function itemLabel(item, app, known) {
+  switch (item.type) {
+    case ITEM.GOLD: return `${item.amount} GOLD`;
+    case ITEM.FOOD: return 'RATION';
+    case ITEM.BOMB: return 'BOMB';
+    case ITEM.KEY: return 'IRON KEY';
+    case ITEM.GOLDKEY: return 'GOLDEN KEY';
+    case ITEM.RELIC: return 'THE AMULET';
+    case ITEM.WEAPON: {
+      const w = WEAPONS[item.tier - 1];
+      return item.upgrade ? `+${item.upgrade} ${w.name}` : w.name;
+    }
+    case ITEM.ARMOR: {
+      const a = ARMORS[item.tier - 1];
+      return item.upgrade ? `+${item.upgrade} ${a.name}` : a.name;
+    }
+    case ITEM.POTION:
+      return known.potions.includes(item.kind)
+        ? `POTION OF ${item.kind.toUpperCase()}`
+        : `${app.potionLook[item.kind]} POTION`;
+    case ITEM.SCROLL:
+      return known.scrolls.includes(item.kind)
+        ? `SCROLL OF ${item.kind.toUpperCase()}`
+        : `SCROLL "${app.scrollLook[item.kind]}"`;
+    default: return '?';
+  }
+}
+
+/** Is this something you keep in the quick bar rather than wear? */
+export function isConsumable(item) {
+  return item.type === ITEM.POTION || item.type === ITEM.SCROLL ||
+         item.type === ITEM.FOOD || item.type === ITEM.BOMB ||
+         item.type === ITEM.KEY || item.type === ITEM.GOLDKEY;
+}
+
+/** A stack key, so five rations occupy one slot. */
+export function stackKey(item) {
+  if (item.type === ITEM.POTION || item.type === ITEM.SCROLL) return `${item.type}:${item.kind}`;
+  return item.type;
+}
+
+// ---------------------------------------------------------------------------
+// What drops where
+// ---------------------------------------------------------------------------
+const COMMON_POTIONS = [POTION.HEALING, POTION.HEALING, POTION.HEALING, POTION.HASTE,
+                        POTION.INVIS, POTION.MIGHT, POTION.FIRE, POTION.FROST,
+                        POTION.TOXIC, POTION.PARALYSIS];
+const COMMON_SCROLLS = [SCROLL.UPGRADE, SCROLL.IDENTIFY, SCROLL.IDENTIFY, SCROLL.MAPPING,
+                        SCROLL.TELEPORT, SCROLL.TERROR, SCROLL.RAGE, SCROLL.RECHARGE];
+
+/** A random floor drop for this depth. */
+export function rollLoot(depth, rng, { rich = false } = {}) {
+  const r = rng.next();
+  if (!rich && r < 0.30) return { type: ITEM.GOLD, amount: rng.range(5, 15 + depth * 4) };
+  if (!rich && r < 0.42) return { type: ITEM.FOOD };
+  if (r < 0.60) return { type: ITEM.POTION, kind: rng.pick(COMMON_POTIONS) };
+  if (r < 0.76) return { type: ITEM.SCROLL, kind: rng.pick(COMMON_SCROLLS) };
+  if (r < 0.84) return { type: ITEM.BOMB, amount: rng.range(1, 3) };
+  const tier = clampTier(Math.ceil(depth / 5) + (rng.chance(0.25) ? 1 : 0));
+  if (r < 0.92) return { type: ITEM.WEAPON, tier, upgrade: rng.chance(0.25) ? 1 : 0 };
+  return { type: ITEM.ARMOR, tier, upgrade: rng.chance(0.25) ? 1 : 0 };
+}
+
+/** Something worth the walk — used for pedestals, vaults and bosses. */
+export function rollPrize(depth, rng) {
+  const r = rng.next();
+  const tier = clampTier(Math.ceil(depth / 5) + 1);
+  if (r < 0.28) return { type: ITEM.WEAPON, tier, upgrade: rng.range(1, 2) };
+  if (r < 0.56) return { type: ITEM.ARMOR, tier, upgrade: rng.range(1, 2) };
+  if (r < 0.74) return { type: ITEM.SCROLL, kind: SCROLL.UPGRADE };
+  if (r < 0.88) return { type: ITEM.POTION, kind: POTION.STRENGTH };
+  return { type: ITEM.GOLD, amount: rng.range(60, 60 + depth * 12) };
+}
+
+/** What an enemy leaves behind, most of the time nothing. */
+export function rollDrop(depth, rng) {
+  const r = rng.next();
+  if (r < 0.55) return null;
+  if (r < 0.78) return { type: ITEM.GOLD, amount: rng.range(3, 8 + depth * 3) };
+  if (r < 0.86) return { type: ITEM.FOOD };
+  if (r < 0.93) return { type: ITEM.POTION, kind: rng.pick(COMMON_POTIONS) };
+  if (r < 0.98) return { type: ITEM.SCROLL, kind: rng.pick(COMMON_SCROLLS) };
+  return { type: ITEM.BOMB, amount: 1 };
+}
+
+function clampTier(t) { return t < 1 ? 1 : t > 5 ? 5 : t; }

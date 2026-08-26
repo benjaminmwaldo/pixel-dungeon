@@ -3,9 +3,12 @@
 import { PAL } from '../client/art/palette.js';
 import * as SPR from '../client/art/sprites.js';
 import * as ITEMS from '../client/art/items.js';
-import { TILE_ART, WATER_2 } from '../client/art/tiles.js';
+import * as MOBART from '../client/art/mobs.js';
+import * as BOSSART from '../client/art/bosses.js';
+import * as GEAR from '../client/art/gear.js';
+import { TILE_ART, WATER_2 } from '../client/art/dungeon-tiles.js';
 import '../client/art/font.js';
-import '../shared/dungeon.js';
+import '../shared/terrain.js';
 
 let bad = 0, checked = 0;
 
@@ -37,6 +40,24 @@ for (const [name, art] of Object.entries(SPR)) {
   if (typeof art !== 'string') continue;
   const big = name.startsWith('WYRM');
   check(name, art, big ? 32 : 16, big ? 32 : 16);
+}
+
+console.log('mobs + class heads:');
+for (const [name, art] of Object.entries(MOBART)) {
+  if (typeof art !== 'string') continue;
+  check(name, art, 16, 16);
+}
+
+console.log('bosses:');
+for (const [name, art] of Object.entries(BOSSART)) {
+  if (typeof art !== 'string') continue;
+  check(name, art, 32, 32);
+}
+
+console.log('gear:');
+for (const [name, art] of Object.entries(GEAR)) {
+  if (typeof art !== 'string') continue;
+  check(name, art, 16, 16);
 }
 
 console.log('items + effects:');

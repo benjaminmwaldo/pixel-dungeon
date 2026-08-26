@@ -7,7 +7,7 @@ const KEY_BITS = {
   ArrowDown: IN.DOWN, KeyS: IN.DOWN,
   ArrowLeft: IN.LEFT, KeyA: IN.LEFT,
   ArrowRight: IN.RIGHT, KeyD: IN.RIGHT,
-  KeyZ: IN.A, KeyJ: IN.A, Space: IN.A,
+  KeyZ: IN.A, KeyJ: IN.A,
   KeyX: IN.B, KeyK: IN.B,
 };
 
@@ -45,7 +45,10 @@ export class Input {
       if (e.code === 'Backspace') { this.emit({ type: 'back' }); return; }
     }
 
+    if (/^Digit[1-8]$/.test(e.code)) { this.emit({ type: 'slot', n: Number(e.code[5]) - 1 }); return; }
+
     switch (e.code) {
+      case 'KeyE': case 'Space': this.emit({ type: 'act' }); break;
       case 'Enter': case 'NumpadEnter': this.emit({ type: 'start' }); break;
       case 'Escape': this.emit({ type: 'cancel' }); break;
       case 'KeyC': case 'ShiftLeft': case 'ShiftRight': this.emit({ type: 'cycle' }); break;
@@ -54,7 +57,7 @@ export class Input {
       case 'ArrowDown': case 'KeyS': this.emit({ type: 'down' }); break;
       case 'ArrowLeft': case 'KeyA': this.emit({ type: 'left' }); break;
       case 'ArrowRight': case 'KeyD': this.emit({ type: 'right' }); break;
-      case 'KeyZ': case 'KeyJ': case 'Space': this.emit({ type: 'a' }); break;
+      case 'KeyZ': case 'KeyJ': this.emit({ type: 'a' }); break;
       case 'KeyX': case 'KeyK': this.emit({ type: 'b' }); break;
     }
   }

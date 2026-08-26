@@ -9,10 +9,12 @@ import { fileURLToPath } from 'node:url';
 
 import { attachWebSocket } from './ws.js';
 import { Game } from './game.js';
-import { TICK_MS, MAX_PLAYERS, IN } from '../shared/constants.js';
+import { TICK_MS, MAX_PLAYERS, IN, CLASSES } from '../shared/constants.js';
+import { MAX_DEPTH } from '../shared/terrain.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const PORT = Number(process.env.PORT || argValue('--port') || 8080);
+const DEV = process.argv.includes('--dev');
 
 function argValue(flag) {
   const i = process.argv.indexOf(flag);
@@ -27,20 +29,15 @@ const MIME = {
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
-  '.png': 'image/png',
-  '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon',
+  '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
   '.txt': 'text/plain; charset=utf-8',
 };
-
 const ALLOWED_DIRS = ['client', 'shared'];
 
 async function serveStatic(req, res) {
   let path = decodeURIComponent(new URL(req.url, 'http://x').pathname);
   if (path === '/' || path === '/index.html') path = '/client/index.html';
-  if (path.startsWith('/client/') === false && path.startsWith('/shared/') === false) {
-    path = '/client' + path;
-  }
+  if (!path.startsWith('/client/') && !path.startsWith('/shared/')) path = '/client' + path;
 
   const rel = normalize(path).replace(/^([/\\])+/, '');
   const top = rel.split(/[/\\]/)[0];
@@ -48,7 +45,6 @@ async function serveStatic(req, res) {
     res.writeHead(403).end('forbidden');
     return;
   }
-
   const file = join(ROOT, rel);
   try {
     const info = await stat(file);
@@ -65,14 +61,12 @@ async function serveStatic(req, res) {
   }
 }
 
-const DEV = process.argv.includes('--dev');
-
 const server = createServer((req, res) => {
   // Dev-only: lets a local browser hand a canvas capture back to disk so the
   // art can be reviewed without a screenshot pipeline. Off unless --dev.
   if (DEV && req.method === 'POST' && req.url === '/__shot') {
     let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 4e6) req.destroy(); });
+    req.on('data', (c) => { body += c; if (body.length > 8e6) req.destroy(); });
     req.on('end', async () => {
       try {
         const b64 = body.replace(/^data:image\/png;base64,/, '');
@@ -91,16 +85,16 @@ const server = createServer((req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Party rooms
+// Parties
 // ---------------------------------------------------------------------------
-const games = new Map();      // code -> Game
-const clients = new Map();    // conn -> { id, code, name }
+const games = new Map();
+const clients = new Map();
 let idSeq = 1;
 
-const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no lookalikes
+const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 function newCode() {
-  for (let attempt = 0; attempt < 200; attempt++) {
+  for (let n = 0; n < 200; n++) {
     let c = '';
     for (let i = 0; i < 4; i++) c += CODE_CHARS[(Math.random() * CODE_CHARS.length) | 0];
     if (!games.has(c)) return c;
@@ -120,27 +114,23 @@ function lobbyPayload(game) {
     code: game.code,
     state: game.state,
     players: [...game.players.values()].map(p => ({
-      id: p.id, name: p.name, colour: p.colour, ready: p.ready,
+      id: p.id, name: p.name, cls: p.cls, ready: p.ready,
     })),
   };
 }
 
 function broadcast(game, obj) {
   const str = JSON.stringify(obj);
-  for (const [conn, c] of clients) {
-    if (c.code === game.code) conn.send(str);
-  }
+  for (const [conn, c] of clients) if (c.code === game.code) conn.send(str);
 }
 
 function connFor(game, playerId) {
-  for (const [conn, c] of clients) {
-    if (c.code === game.code && c.id === playerId) return conn;
-  }
+  for (const [conn, c] of clients) if (c.code === game.code && c.id === playerId) return conn;
   return null;
 }
 
 attachWebSocket(server, (conn) => {
-  const client = { id: idSeq++, code: null, name: 'HERO', lastPing: Date.now() };
+  const client = { id: idSeq++, code: null, name: 'HERO' };
   clients.set(conn, client);
 
   conn.on('message', (raw) => {
@@ -153,90 +143,87 @@ attachWebSocket(server, (conn) => {
   conn.on('close', () => {
     const game = client.code && games.get(client.code);
     clients.delete(conn);
-    if (game) {
-      game.removePlayer(client.id);
-      if (game.players.size === 0) {
-        games.delete(game.code);
-      } else {
-        broadcast(game, lobbyPayload(game));
-        broadcast(game, { t: 'note', m: `${client.name} LEFT` });
-      }
+    if (!game) return;
+    game.removePlayer(client.id);
+    if (game.players.size === 0) games.delete(game.code);
+    else {
+      broadcast(game, lobbyPayload(game));
+      broadcast(game, { t: 'note', m: `${client.name} LEFT THE PARTY` });
     }
   });
 });
 
 function handle(conn, client, msg) {
+  const game = client.code ? games.get(client.code) : null;
+  const p = game?.players.get(client.id);
+
   switch (msg.t) {
     case 'create': {
       const code = newCode();
-      const game = new Game(code);
-      games.set(code, game);
-      joinGame(conn, client, game, msg.name);
+      const g = new Game(code);
+      games.set(code, g);
+      joinGame(conn, client, g, msg.name, msg.cls);
       break;
     }
     case 'join': {
       const code = String(msg.code || '').toUpperCase().trim();
-      const game = games.get(code);
-      if (!game) { conn.sendJson({ t: 'error', m: 'NO SUCH PARTY' }); return; }
-      if (game.players.size >= MAX_PLAYERS) { conn.sendJson({ t: 'error', m: 'PARTY IS FULL' }); return; }
-      joinGame(conn, client, game, msg.name);
+      const g = games.get(code);
+      if (!g) { conn.sendJson({ t: 'error', m: 'NO SUCH PARTY' }); return; }
+      if (g.players.size >= MAX_PLAYERS) { conn.sendJson({ t: 'error', m: 'PARTY IS FULL' }); return; }
+      joinGame(conn, client, g, msg.name, msg.cls);
+      break;
+    }
+    case 'class': {
+      if (!game || !p || game.state !== 'lobby') return;
+      const want = String(msg.cls || '');
+      if (!CLASSES[want]) return;
+      const taken = [...game.players.values()].some(o => o.id !== p.id && o.cls === want);
+      if (taken) return;
+      p.cls = want;
+      p.colour = CLASSES[want].colour;
+      p.hp = p.maxHp = CLASSES[want].hp;
+      game.metaDirty = true;
+      broadcast(game, lobbyPayload(game));
       break;
     }
     case 'ready': {
-      const game = games.get(client.code);
-      if (!game) return;
-      const p = game.players.get(client.id);
-      if (!p) return;
+      if (!game || !p) return;
       p.ready = !!msg.v;
       broadcast(game, lobbyPayload(game));
       const all = [...game.players.values()];
-      if (game.state === 'lobby' && all.length > 0 && all.every(x => x.ready)) {
+      if (game.state === 'lobby' && all.length && all.every(x => x.ready)) {
         game.begin();
         broadcast(game, { t: 'start' });
       }
       break;
     }
     case 'in': {
-      const game = games.get(client.code);
-      if (!game) return;
-      const p = game.players.get(client.id);
-      if (!p) return;
-      // Queue every frame the client sends. Sampling only the newest would
-      // drop a sword swing that was held for a single tick.
+      if (!game || !p) return;
       const bits = (msg.b | 0) & (IN.UP | IN.RIGHT | IN.DOWN | IN.LEFT | IN.A | IN.B);
       p.queue.push({ seq: msg.s | 0, bits });
       if (p.queue.length > 12) p.queue.splice(0, p.queue.length - 12);
       game.lastActivity = Date.now();
       break;
     }
-    case 'cycle': {
-      const game = games.get(client.code);
-      const p = game?.players.get(client.id);
-      if (p) { game.cycleItem(p); game.metaDirty = true; }
-      break;
-    }
-    case 'again': {
-      const game = games.get(client.code);
-      if (!game) return;
-      if (game.state === 'win' || game.state === 'over') {
+    case 'act': if (game && p) game.interact(p); break;
+    case 'use': if (game && p) game.useSlot(p, msg.n | 0); break;
+    case 'again':
+      if (game && (game.state === 'win' || game.state === 'over')) {
         game.restart();
         broadcast(game, { t: 'start' });
       }
       break;
-    }
-    case 'ping':
-      conn.sendJson({ t: 'pong', c: msg.c });
-      break;
+    case 'ping': conn.sendJson({ t: 'pong', c: msg.c }); break;
   }
 }
 
-function joinGame(conn, client, game, name) {
+function joinGame(conn, client, game, name, cls) {
   const clean = String(name || 'HERO').replace(/[^A-Za-z0-9 ]/g, '').trim().slice(0, 8) || 'HERO';
-  const p = game.addPlayer(client.id, clean);
+  const p = game.addPlayer(client.id, clean, cls);
   if (!p) { conn.sendJson({ t: 'error', m: 'PARTY IS FULL' }); return; }
   client.code = game.code;
   client.name = p.name;
-  conn.sendJson({ t: 'welcome', id: client.id, code: game.code, colour: p.colour });
+  conn.sendJson({ t: 'welcome', id: client.id, code: game.code, cls: p.cls });
   broadcast(game, lobbyPayload(game));
   if (game.state !== 'lobby') conn.sendJson({ t: 'start' });
 }
@@ -246,12 +233,13 @@ function joinGame(conn, client, game, name) {
 // ---------------------------------------------------------------------------
 let last = Date.now();
 let acc = 0;
+let exploredBeat = 0;
 
 setInterval(() => {
   const now = Date.now();
   acc += now - last;
   last = now;
-  if (acc > 250) acc = 250;   // don't spiral after a stall
+  if (acc > 250) acc = 250;
 
   let steps = 0;
   while (acc >= TICK_MS && steps < 5) {
@@ -262,21 +250,43 @@ setInterval(() => {
     }
   }
   if (!steps) return;
+  exploredBeat++;
 
   for (const game of games.values()) {
     if (game.state === 'lobby') continue;
 
     for (const p of game.players.values()) {
       const conn = connFor(game, p.id);
-      if (conn) conn.sendJson(game.snapshotFor(p));
+      if (!conn) continue;
+      if (p.needFloor) {
+        p.needFloor = false;
+        conn.sendJson(game.floorPacket(p));
+      }
+      conn.sendJson(game.snapshotFor(p));
     }
+
+    // teammates' exploration bleeds into everyone's map, a couple of times a second
+    if (exploredBeat % 15 === 0) {
+      const depths = new Set([...game.players.values()].map(x => x.depth));
+      for (const d of depths) {
+        const f = game.floors.get(d);
+        if (!f?.mapDirty) continue;
+        f.mapDirty = false;
+        const packet = JSON.stringify(game.exploredPacket(d));
+        for (const o of game.players.values()) {
+          if (o.depth !== d) continue;
+          connFor(game, o.id)?.send(packet);
+        }
+      }
+    }
+
     if (game.metaDirty) {
       game.metaDirty = false;
       broadcast(game, game.metaFor());
     }
     for (const b of game.banners) broadcast(game, { t: 'b', ...b });
     game.banners.length = 0;
-    game.clearFx();
+    game.clearTransient();
 
     if (game.state === 'win' && !game.announcedWin) {
       game.announcedWin = true;
@@ -284,18 +294,30 @@ setInterval(() => {
         t: 'win',
         stats: {
           time: Math.round((Date.now() - game.startedAt) / 1000),
-          kills: game.kills,
-          deaths: game.deaths,
-          gems: game.party.gems,
-          players: [...game.players.values()].map(p => ({ name: p.name, kills: p.kills, colour: p.colour })),
+          kills: game.kills, deaths: game.deaths, deepest: MAX_DEPTH,
+          players: [...game.players.values()].map(x => ({
+            name: x.name, cls: x.cls, level: x.level, kills: x.kills, gold: x.gold,
+          })),
         },
       });
     }
-    if (game.state !== 'win') game.announcedWin = false;
+    if (game.state === 'over' && !game.announcedOver) {
+      game.announcedOver = true;
+      broadcast(game, {
+        t: 'over',
+        stats: {
+          time: Math.round((Date.now() - game.startedAt) / 1000),
+          kills: game.kills, deaths: game.deaths, deepest: game.deepest,
+          players: [...game.players.values()].map(x => ({
+            name: x.name, cls: x.cls, level: x.level, kills: x.kills, gold: x.gold,
+          })),
+        },
+      });
+    }
+    if (game.state === 'play') { game.announcedWin = false; game.announcedOver = false; }
   }
 }, TICK_MS);
 
-// Reap parties nobody is in.
 setInterval(() => {
   for (const [code, game] of games) {
     if (game.players.size === 0 && Date.now() - game.lastActivity > 60_000) games.delete(code);
@@ -306,13 +328,11 @@ setInterval(() => {
 server.listen(PORT, () => {
   const addrs = [];
   for (const list of Object.values(networkInterfaces())) {
-    for (const ni of list || []) {
-      if (ni.family === 'IPv4' && !ni.internal) addrs.push(ni.address);
-    }
+    for (const ni of list || []) if (ni.family === 'IPv4' && !ni.internal) addrs.push(ni.address);
   }
   console.log('');
-  console.log('  THE SUNKEN CRYPT — dungeon server running');
-  console.log('  ------------------------------------------');
+  console.log('  PIXEL DUNGEON — 25 floors, up to 4 heroes');
+  console.log('  -----------------------------------------');
   console.log(`  You:      http://localhost:${PORT}`);
   for (const a of addrs) console.log(`  Friends:  http://${a}:${PORT}`);
   console.log('');

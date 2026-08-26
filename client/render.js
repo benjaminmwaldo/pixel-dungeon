@@ -1,19 +1,62 @@
-// Everything you see. Draws into a 256x240 buffer at 1:1 pixels, then blits it
+// Everything you see. Draws into a 320x240 buffer at 1:1 pixels, then blits it
 // to the visible canvas at an integer scale with smoothing off.
+//
+// The floor is bigger than the screen, so the camera follows you; anything you
+// have never seen stays black, anything you have seen but cannot see now is
+// drawn dim, and only what is in sight right now is lit.
 
 import {
-  TILE, ROOM_W, ROOM_H, PLAY_W, PLAY_H, HUD_H, SCREEN_W, SCREEN_H,
-  T, KIND, PICKUP, DOOR, N, E, S, W, DOOR_TILES, PLAYER_COLORS,
-  TRANSITION_TICKS, ATTACK_TICKS,
+  TILE, VIEW_W, VIEW_H, HUD_H, SCREEN_W, SCREEN_H, KIND, CLASSES, CLASS_ORDER,
+  N, E, W, ATTACK_TICKS, HUNGER_MAX, isBoss, clamp,
 } from '../shared/constants.js';
-import { DS } from '../shared/physics.js';
-import { ROOM_BY_ID, GRID_W, GRID_H, DUNGEON_NAME } from '../shared/dungeon.js';
-import { IMG, TILE_IMG, HERO_IMG, bakeAll, blit, text, textCentered, textWidth, silhouette } from './art/bake.js';
+import { LEVEL_W, LEVEL_H, TT, idx, tx, ty, regionOf } from '../shared/terrain.js';
+import { ITEM, POTION_TINT } from '../shared/items.js';
+import { MOBS } from '../shared/mobs.js';
+import {
+  IMG, TILE_IMG, TILE_DIM, WATER_IMG, WATER_DIM, HERO_IMG, bakeAll,
+  blit, text, textCentered, textWidth, silhouette, potionImg,
+} from './art/bake.js';
 
 const C = {
-  black: '#000000', stone: '#C0C0D8', stoneMid: '#808098', stoneDark: '#404058',
-  gold: '#F8B800', white: '#FCFCFC', grey: '#7C7C7C', red: '#F83800',
-  blue: '#0078F8', dark: '#0A0A12', hudBg: '#000000', panel: '#16162A',
+  black: '#000000', ink: '#05070E', mid: '#808098',
+  dark: '#2A2E3E', gold: '#F8B800', white: '#FCFCFC',
+  red: '#F83800', green: '#40C040', blue: '#3CA0FC', panel: '#12141F',
+};
+
+const CLASS_DOT = { warrior: '#F83800', mage: '#0078F8', rogue: '#9840F8', ranger: '#00A800' };
+
+const MOB_SPRITE = {
+  [KIND.RAT]: ['RAT1', 'RAT2'],
+  [KIND.SNAKE]: ['SNAKE1', 'SNAKE2'],
+  [KIND.CRAB]: ['CRAB1', 'CRAB2'],
+  [KIND.SLIME]: ['SLIME1', 'SLIME2'],
+  [KIND.FLY]: ['FLY1', 'FLY2'],
+  [KIND.SKELETON]: ['BONE1', 'BONE2'],
+  [KIND.THIEF]: ['THIEF1', 'THIEF2'],
+  [KIND.GUARD]: ['IRON_S1', 'IRON_S2'],
+  [KIND.SHAMAN]: ['WISP1', 'WISP2'],
+  [KIND.WRAITH]: ['WRAITH1', 'WRAITH2'],
+  [KIND.BAT]: ['BAT1', 'BAT2'],
+  [KIND.BRUTE]: ['BRUTE1', 'BRUTE2'],
+  [KIND.SPIDER]: ['SPIDER1', 'SPIDER2'],
+  [KIND.GOLEM]: ['GOLEM1', 'GOLEM2'],
+  [KIND.MONK]: ['MONK1', 'MONK2'],
+  [KIND.WARLOCK]: ['WARLOCK1', 'WARLOCK2'],
+  [KIND.ELEMENTAL]: ['ELEMENTAL1', 'ELEMENTAL2'],
+  [KIND.DEMON]: ['DEMON1', 'DEMON2'],
+  [KIND.EYE]: ['EYE1', 'EYE2'],
+  [KIND.SCORPIO]: ['SCORPIO1', 'SCORPIO2'],
+  [KIND.BOSS_GLUT]: ['BOSS_GLUT1', 'BOSS_GLUT2'],
+  [KIND.BOSS_WARDEN]: ['BOSS_WARDEN1', 'BOSS_WARDEN2'],
+  [KIND.BOSS_TYRANT]: ['BOSS_TYRANT1', 'BOSS_TYRANT2'],
+  [KIND.BOSS_KING]: ['BOSS_KING1', 'BOSS_KING2'],
+  [KIND.BOSS_UNSLEEPING]: ['BOSS_UNSLEEPING1', 'BOSS_UNSLEEPING2'],
+};
+
+const SHOT_SPRITE = {
+  [KIND.ARROW]: 'BLADE', [KIND.BOLT]: 'MAGIC', [KIND.FIREBALL]: 'FIREBALL',
+  [KIND.DART]: 'BLADE', [KIND.WEB]: 'MAGIC', [KIND.ACID]: 'FIREBALL',
+  [KIND.BEAM]: 'MAGIC',
 };
 
 export class Renderer {
@@ -26,15 +69,15 @@ export class Renderer {
     this.ctx = this.buf.getContext('2d');
     this.ctx.imageSmoothingEnabled = false;
     this.vctx.imageSmoothingEnabled = false;
-    this.roomCache = new Map();
     this.frame = 0;
+    this.cam = { x: 0, y: 0 };
+    this.boss = null;
     bakeAll();
   }
 
   resize() {
-    const pad = 8;
-    const sx = Math.floor((window.innerWidth - pad) / SCREEN_W);
-    const sy = Math.floor((window.innerHeight - pad) / SCREEN_H);
+    const sx = Math.floor((window.innerWidth - 8) / SCREEN_W);
+    const sy = Math.floor((window.innerHeight - 8) / SCREEN_H);
     const scale = Math.max(1, Math.min(sx, sy));
     this.scale = scale;
     this.view.width = SCREEN_W * scale;
@@ -49,499 +92,385 @@ export class Renderer {
     this.vctx.drawImage(this.buf, 0, 0, this.view.width, this.view.height);
   }
 
-  clear(colour = C.black) {
+  clear(colour = C.ink) {
     this.ctx.fillStyle = colour;
     this.ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
   }
 
   // =========================================================================
-  // Rooms
+  // The floor
   // =========================================================================
-  roomCanvas(roomId, doors, pushed) {
-    const key = `${roomId}|${doors.join('')}|${pushed ? 1 : 0}`;
-    let c = this.roomCache.get(key);
-    if (c) return c;
+  drawWorld(st) {
+    this.frame++;
+    this.boss = null;
+    const g = this.ctx;
+    const region = st.region || 'sewers';
+    const tiles = st.tiles, fov = st.fov, seen = st.explored;
 
-    const def = ROOM_BY_ID.get(roomId);
-    if (!def) return null;
-    c = document.createElement('canvas');
-    c.width = PLAY_W; c.height = PLAY_H;
-    const g = c.getContext('2d');
-    g.imageSmoothingEnabled = false;
+    const camX = clamp(Math.round(st.me.x + 8 - VIEW_W / 2), 0, LEVEL_W * TILE - VIEW_W);
+    const camY = clamp(Math.round(st.me.y + 8 - VIEW_H / 2), 0, LEVEL_H * TILE - VIEW_H);
+    this.cam.x = camX; this.cam.y = camY;
 
-    const tiles = Uint8Array.from(def.tiles);
-    if (pushed && def.pushBlock) {
-      // mirror the server's single legal push
-      const tx = def.pushBlock.ix + 1, ty = def.pushBlock.iy + 1;
-      tiles[ty * ROOM_W + tx] = T.FLOOR;
-    }
+    g.save();
+    g.beginPath();
+    g.rect(0, HUD_H, VIEW_W, VIEW_H);
+    g.clip();
+    g.translate(-camX, HUD_H - camY);
 
-    g.fillStyle = C.dark;
-    g.fillRect(0, 0, PLAY_W, PLAY_H);
-    for (let y = 0; y < ROOM_H; y++) {
-      for (let x = 0; x < ROOM_W; x++) {
-        const t = tiles[y * ROOM_W + x];
-        if (t === T.WATER) continue;               // animated, drawn per frame
-        const img = TILE_IMG[t === T.DOORWAY ? T.FLOOR : t];
+    g.fillStyle = C.black;
+    g.fillRect(camX, camY, VIEW_W, VIEW_H);
+
+    const lit = TILE_IMG[region] || TILE_IMG.sewers;
+    const remembered = TILE_DIM[region] || TILE_DIM.sewers;
+    const wf = (this.frame >> 5) & 1;
+    const water = (WATER_IMG[region] || WATER_IMG.sewers)[wf];
+    const waterDim = (WATER_DIM[region] || WATER_DIM.sewers)[wf];
+
+    const x0 = Math.max(0, (camX / TILE) | 0);
+    const y0 = Math.max(0, (camY / TILE) | 0);
+    const x1 = Math.min(LEVEL_W - 1, ((camX + VIEW_W) / TILE) | 0);
+    const y1 = Math.min(LEVEL_H - 1, ((camY + VIEW_H) / TILE) | 0);
+
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const i = idx(x, y);
+        const visible = fov[i];
+        if (!visible && !seen[i]) continue;
+        let t = tiles[i];
+        if (t === TT.TRAP_HIDDEN) t = TT.FLOOR;
+        const img = t === TT.WATER ? (visible ? water : waterDim)
+                                   : (visible ? lit[t] : remembered[t]);
         if (img) g.drawImage(img, x * TILE, y * TILE);
       }
     }
-    for (let d = 0; d < 4; d++) this.drawDoor(g, d, def.doors[d], doors[d]);
 
-    this.roomCache.set(key, c);
-    if (this.roomCache.size > 60) {
-      this.roomCache.delete(this.roomCache.keys().next().value);
+    for (const e of st.items) this.drawItem(e, st);
+    for (const e of st.ents) this.drawEntity(e);
+    for (const o of st.others) {
+      this.drawHero(o.x, o.y, o.dir, CLASS_ORDER[o.clsIdx] || 'warrior',
+        o.atk, o.walk, o.ghost, 0, o.name, o.invis);
     }
-    return c;
-  }
+    this.drawHero(st.me.x, st.me.y, st.me.dir, st.me.cls, st.me.atk, st.me.walk,
+      st.me.ghost, st.me.invuln, null, st.me.invis);
 
-  /** Water animates, so it is painted over the cached room each frame. */
-  drawWater(roomId, ox, oy, pushed) {
-    const def = ROOM_BY_ID.get(roomId);
-    if (!def) return;
-    const img = ((this.frame >> 5) & 1) ? TILE_IMG.water2 : TILE_IMG[T.WATER];
-    const g = this.ctx;
-    for (let y = 0; y < ROOM_H; y++) {
-      for (let x = 0; x < ROOM_W; x++) {
-        if (def.tiles[y * ROOM_W + x] === T.WATER) {
-          g.drawImage(img, ox + x * TILE, oy + y * TILE);
-        }
-      }
-    }
-  }
-
-  drawDoor(g, dir, type, state) {
-    if (type === DOOR.NONE) return;
-    const vertical = (dir === N || dir === S);
-    const [tx, ty] = DOOR_TILES[dir][0];
-    const x = tx * TILE, y = ty * TILE;
-    const w = vertical ? 32 : 16;
-    const h = vertical ? 16 : 16;
-
-    // A bombable wall reads as plain wall until it is blown open.
-    if (type === DOOR.BOMB && state !== DS.OPEN) {
-      for (const [dx, dy] of DOOR_TILES[dir]) {
-        g.drawImage(TILE_IMG[T.WALL], dx * TILE, dy * TILE);
-      }
-      g.fillStyle = C.black;
-      const cx = x + (vertical ? 16 : 8), cy = y + 8;
-      g.fillRect(cx - 1, cy - 5, 2, 3);
-      g.fillRect(cx, cy - 2, 2, 3);
-      g.fillRect(cx - 2, cy + 1, 2, 4);
-      return;
-    }
-
-    g.fillStyle = C.black;
-    g.fillRect(x, y, w, h);
-
-    const jamb = vertical ? 7 : 4;
-    g.fillStyle = C.stoneMid;
-    if (vertical) {
-      g.fillRect(x, y, jamb, h);
-      g.fillRect(x + w - jamb, y, jamb, h);
-      g.fillStyle = C.stone;
-      g.fillRect(x, y, 2, h);
-      g.fillRect(x + w - 2, y, 2, h);
-      g.fillStyle = C.stoneDark;
-      g.fillRect(x + jamb - 2, y, 2, h);
-      g.fillRect(x + w - jamb, y, 2, h);
-      // lintel on the outer edge
-      g.fillStyle = C.stoneMid;
-      if (dir === N) g.fillRect(x, y, w, 3); else g.fillRect(x, y + h - 3, w, 3);
-    } else {
-      g.fillRect(x, y, w, jamb);
-      g.fillRect(x, y + h - jamb, w, jamb);
-      g.fillStyle = C.stone;
-      g.fillRect(x, y, w, 2);
-      g.fillRect(x, y + h - 2, w, 2);
-      g.fillStyle = C.stoneMid;
-      if (dir === W) g.fillRect(x, y, 3, h); else g.fillRect(x + w - 3, y, 3, h);
-    }
-
-    if (state === DS.OPEN) return;
-
-    // Still shut — show why.
-    const cx = x + w / 2, cy = y + h / 2;
-    if (type === DOOR.SHUT) {
-      g.fillStyle = C.gold;
-      if (vertical) {
-        for (const bx of [cx - 8, cx - 2, cx + 4]) g.fillRect(bx, y + 3, 3, h - 5);
-      } else {
-        for (const by of [cy - 6, cy - 1, cy + 4]) g.fillRect(x + 3, by, w - 6, 2);
-      }
-    } else if (type === DOOR.LOCK) {
-      g.fillStyle = C.gold;
-      g.fillRect(cx - 5, cy - 5, 10, 10);
-      g.fillStyle = C.black;
-      g.fillRect(cx - 1, cy - 3, 2, 3);
-      g.fillRect(cx - 2, cy, 4, 3);
-    } else if (type === DOOR.BOSS) {
-      g.fillStyle = C.white;
-      g.fillRect(cx - 5, cy - 6, 10, 8);
-      g.fillRect(cx - 4, cy + 2, 8, 3);
-      g.fillStyle = C.black;
-      g.fillRect(cx - 3, cy - 4, 2, 3);
-      g.fillRect(cx + 1, cy - 4, 2, 3);
-      g.fillRect(cx - 1, cy + 2, 2, 3);
-    }
-  }
-
-  // =========================================================================
-  // World
-  // =========================================================================
-  drawWorld(S_, alpha) {
-    const g = this.ctx;
-    this.frame++;
-    g.save();
-    g.beginPath();
-    g.rect(0, HUD_H, PLAY_W, PLAY_H);
-    g.clip();
-    g.translate(0, HUD_H);
-
-    const me = S_.me;
-    const scroll = this.scrollOffset(S_);
-
-    if (scroll) {
-      const from = this.roomCanvas(scroll.fromId, scroll.fromDoors, false);
-      if (from) g.drawImage(from, scroll.ox0, scroll.oy0);
-      this.drawWater(scroll.fromId, scroll.ox0, scroll.oy0, false);
-    }
-
-    const room = this.roomCanvas(S_.room.id, S_.room.doors, S_.room.pushed);
-    const ox = scroll ? scroll.ox1 : 0;
-    const oy = scroll ? scroll.oy1 : 0;
-    if (room) g.drawImage(room, ox, oy);
-    this.drawWater(S_.room.id, ox, oy, S_.room.pushed);
-
-    if (!scroll) {
-      for (const e of S_.ents) this.drawEntity(e, 0, 0);
-      for (const o of S_.others) this.drawPlayer(o.x, o.y, o.dir, o.colour, o.atk, o.walk, o.ghost, 0, o.name, 0, 0);
-    }
-    this.drawPlayer(me.x, me.y, me.dir, S_.colour, me.atk, me.walk, me.ghost, me.invuln, null, ox, oy);
-
-    g.restore();
-    this.drawParticles(S_);
-  }
-
-  scrollOffset(S_) {
-    const me = S_.me;
-    if (!me.trans || me.trans <= 0 || !me.transFrom) return null;
-    const p = 1 - (me.trans / TRANSITION_TICKS);
-    const dir = me.transDir;
-    const dx = dir === E ? -1 : dir === W ? 1 : 0;
-    const dy = dir === S ? -1 : dir === N ? 1 : 0;
-    const fromDef = ROOM_BY_ID.get(me.transFrom);
-    return {
-      fromId: me.transFrom,
-      fromDoors: fromDef ? fromDef.doors.map(t => (t === DOOR.NONE ? DS.SOLID : DS.OPEN)) : [0, 0, 0, 0],
-      ox0: Math.round(dx * p * PLAY_W),
-      oy0: Math.round(dy * p * PLAY_H),
-      ox1: Math.round(dx * p * PLAY_W - dx * PLAY_W),
-      oy1: Math.round(dy * p * PLAY_H - dy * PLAY_H),
-    };
-  }
-
-  drawPlayer(x, y, dir, colour, atk, walk, ghost, invuln, name, ox = 0, oy = 0) {
-    const g = this.ctx;
-    if (invuln > 0 && (this.frame >> 1) % 2 === 0 && !ghost) return;
-    const set = HERO_IMG[colour] || HERO_IMG.green;
-    const side = dir === E || dir === W;
-    const step = walk >= 8 ? 2 : 1;
-    let img, flip = dir === W;
-
-    if (atk > 0) {
-      img = side ? set.HERO_ATK_E : (dir === N ? set.HERO_ATK_N : set.HERO_ATK_S);
-    } else if (side) {
-      img = step === 1 ? set.HERO_E1 : set.HERO_E2;
-    } else if (dir === N) {
-      img = step === 1 ? set.HERO_N1 : set.HERO_N2;
-    } else {
-      img = step === 1 ? set.HERO_S1 : set.HERO_S2;
-    }
-
-    const px = x + ox, py = y + oy;
-    if (ghost) {
-      g.save();
-      g.globalAlpha = 0.45 + 0.15 * Math.sin(this.frame / 8);
-      blit(g, silhouette(img, '#9CE0FC'), px, py, flip);
-      g.restore();
-    } else {
-      blit(g, img, px, py, flip);
-      if (atk > 0) this.drawSword(px, py, dir, atk);
-    }
-
-    if (name) {
-      // 7px spacing: every glyph fits in 7 columns, so nothing overlaps.
-      text(g, name, Math.round(px + 8 - textWidth(name, 7) / 2), py - 9, 'white', 7);
-    }
-  }
-
-  drawSword(x, y, dir, atk) {
-    const g = this.ctx;
-    // The blade extends fully at the start of the swing and pulls back in.
-    const reach = atk > ATTACK_TICKS - 3 ? 5 : atk > 3 ? 11 : 5;
-    switch (dir) {
-      case N: blit(g, IMG.SWORD_UP, x, y - reach - 4); break;
-      case S: blit(g, IMG.SWORD_UP, x, y + reach + 4, false, true); break;
-      case E: blit(g, IMG.SWORD_RIGHT, x + reach, y); break;
-      default: blit(g, IMG.SWORD_RIGHT, x - reach, y, true); break;
-    }
-  }
-
-  drawEntity(e, ox, oy) {
-    const g = this.ctx;
-    const f = this.frame;
-    const x = e.x + ox, y = e.y + oy;
-    const flash = (e.flags & 1) && ((f >> 1) & 1);
-    const stunned = e.flags & 2;
-    const hidden = e.flags & 4;
-    let img = null, flip = false;
-
-    switch (e.kind) {
-      case KIND.BAT: img = ((f >> 2) & 1) ? IMG.BAT2 : IMG.BAT1; break;
-      case KIND.SLIME:
-      case KIND.SLIMELET: img = ((f >> 3) & 1) ? IMG.SLIME2 : IMG.SLIME1; break;
-      case KIND.BONEWALKER: img = ((f >> 3) & 1) ? IMG.BONE2 : IMG.BONE1; break;
-      case KIND.HURLER:
-      case KIND.IRONCLAD: {
-        const pre = e.kind === KIND.HURLER ? 'HURLER' : 'IRON';
-        const alt = ((f >> 3) & 1) ? 2 : 1;
-        if (e.dir === E || e.dir === W) { img = IMG[`${pre}_E${alt}`]; flip = e.dir === W; }
-        else if (e.dir === N) img = IMG[`${pre}_N1`];
-        else img = IMG[`${pre}_S${alt}`];
-        break;
-      }
-      case KIND.WISP: {
-        if (hidden) return;
-        img = ((f >> 3) & 1) ? IMG.WISP2 : IMG.WISP1;
-        break;
-      }
-      case KIND.GRABHAND: img = ((f >> 3) & 1) ? IMG.HAND2 : IMG.HAND1; break;
-      case KIND.WYRM: img = (e.flags & 8) ? IMG.WYRM2 : IMG.WYRM1; break;
-
-      case KIND.FIREBALL: img = IMG.FIREBALL; break;
-      case KIND.MAGIC: img = IMG.MAGIC; break;
-      case KIND.BLADE: img = IMG.BLADE; break;
-      case KIND.BOOMERANG: img = IMG.BOOMERANG; break;
-      case KIND.BEAM: {
-        const vertical = e.dir === N || e.dir === S;
-        img = vertical ? IMG.BEAM_V : IMG.BEAM_H;
-        flip = e.dir === W;
-        blit(g, img, x, y, flip, e.dir === N);
-        return;
-      }
-      case KIND.BOMB: {
-        if ((f >> 1) & 1) { blit(g, silhouette(IMG.ITEM_BOMB, '#FCFCFC'), x, y); }
-        else blit(g, IMG.ITEM_BOMB, x, y);
-        return;
-      }
-      case KIND.BLAST: {
-        const stage = e.t !== undefined ? e.t : 0;
-        const spr = [IMG.BLAST1, IMG.BLAST2, IMG.BLAST3][Math.min(2, ((f >> 2) % 3))];
-        for (const [qx, qy] of [[0, 0], [16, 0], [0, 16], [16, 16]]) {
-          blit(g, spr, x + qx, y + qy, qx > 0, qy > 0);
-        }
-        return;
-      }
-      case KIND.DROP: {
-        const spr = DROP_SPRITE[e.item];
-        if (!spr) return;
-        let s = IMG[spr];
-        if (e.item === PICKUP.FAIRY) s = ((f >> 3) & 1) ? IMG.ITEM_FAIRY2 : IMG.ITEM_FAIRY;
-        // a brief twinkle so items read as pickups without losing their shape
-        if ((f & 31) < 2) s = silhouette(s, '#FCFCFC');
-        blit(g, s, x, y);
-        return;
-      }
-      default: return;
-    }
-
-    if (!img) return;
-    if (flash) img = silhouette(img, '#FCFCFC');
-    else if (stunned && ((f >> 2) & 1)) img = silhouette(img, '#9CE0FC');
-    blit(g, img, x, y, flip);
-  }
-
-  // Local one-shot puffs, spawned from server fx events.
-  drawParticles(S_) {
-    const g = this.ctx;
-    g.save();
-    g.beginPath();
-    g.rect(0, HUD_H, PLAY_W, PLAY_H);
-    g.clip();
-    g.translate(0, HUD_H);
-    for (const p of S_.particles) {
+    for (const p of st.particles) {
       const spr = p.kind === 'poof'
         ? [IMG.POOF1, IMG.POOF2, IMG.POOF3][Math.min(2, (p.age / 5) | 0)]
         : [IMG.BLAST1, IMG.BLAST2, IMG.BLAST3][Math.min(2, (p.age / 4) | 0)];
       blit(g, spr, p.x - 8, p.y - 8);
     }
+
     g.restore();
+  }
+
+  drawHero(x, y, dir, cls, atk, walk, ghost, invuln, name, invis) {
+    const g = this.ctx;
+    if (invuln > 0 && (this.frame >> 1) % 2 === 0 && !ghost) return;
+    const set = HERO_IMG[cls] || HERO_IMG.warrior;
+    const side = dir === E || dir === W;
+    const step = walk >= 8 ? 2 : 1;
+    const flip = dir === W;
+    let img;
+
+    if (atk > 0) img = side ? set.HERO_ATK_E : (dir === N ? set.HERO_ATK_N : set.HERO_ATK_S);
+    else if (side) img = step === 1 ? set.HERO_E1 : set.HERO_E2;
+    else if (dir === N) img = step === 1 ? set.HERO_N1 : set.HERO_N2;
+    else img = step === 1 ? set.HERO_S1 : set.HERO_S2;
+
+    if (ghost) {
+      g.save();
+      g.globalAlpha = 0.4 + 0.15 * Math.sin(this.frame / 8);
+      blit(g, silhouette(img, '#9CE0FC'), x, y, flip);
+      g.restore();
+    } else {
+      if (invis > 0) { g.save(); g.globalAlpha = 0.35; }
+      blit(g, img, x, y, flip);
+      if (invis > 0) g.restore();
+      if (atk > 0) this.drawSword(x, y, dir, atk);
+    }
+    if (name) text(g, name, Math.round(x + 8 - textWidth(name, 7) / 2), y - 9, 'white', 7);
+  }
+
+  drawSword(x, y, dir, atk) {
+    const g = this.ctx;
+    const reach = atk > ATTACK_TICKS - 3 ? 5 : atk > 3 ? 11 : 5;
+    switch (dir) {
+      case N: blit(g, IMG.SWORD_UP, x, y - reach - 4); break;
+      case E: blit(g, IMG.SWORD_RIGHT, x + reach, y); break;
+      case W: blit(g, IMG.SWORD_RIGHT, x - reach, y, true); break;
+      default: blit(g, IMG.SWORD_UP, x, y + reach + 4, false, true); break;
+    }
+  }
+
+  drawEntity(e) {
+    const g = this.ctx;
+    const f = this.frame;
+    const flash = (e.flags & 1) && ((f >> 1) & 1);
+    const frozen = e.flags & 2;
+    const hidden = e.flags & 4;
+    const mouth = e.flags & 8;
+
+    const pair = MOB_SPRITE[e.kind];
+    if (pair) {
+      if (hidden) return;
+      const big = isBoss(e.kind);
+      let img = IMG[big ? (mouth ? pair[1] : pair[0]) : (((f >> 3) & 1) ? pair[1] : pair[0])];
+      if (!img) return;
+      if (flash) img = silhouette(img, '#FCFCFC');
+      else if (frozen && ((f >> 2) & 1)) img = silhouette(img, '#9CE0FC');
+      else if (e.flags & 16) img = silhouette(img, '#F87038');
+      blit(g, img, e.x, e.y);
+      if (big) this.boss = e;
+      else if (e.hp < e.maxHp) this.mobBar(e);
+      return;
+    }
+
+    const shot = SHOT_SPRITE[e.kind];
+    if (shot) { blit(g, IMG[shot], e.x, e.y); return; }
+
+    if (e.kind === KIND.BOMB) {
+      blit(g, ((f >> 1) & 1) ? silhouette(IMG.ITEM_BOMB, '#FCFCFC') : IMG.ITEM_BOMB, e.x, e.y);
+      return;
+    }
+    if (e.kind === KIND.BLAST) {
+      const spr = [IMG.BLAST1, IMG.BLAST2, IMG.BLAST3][Math.min(2, ((f >> 2) % 3))];
+      for (const [qx, qy] of [[0, 0], [16, 0], [0, 16], [16, 16]]) {
+        blit(g, spr, e.x + qx, e.y + qy, qx > 0, qy > 0);
+      }
+    }
+  }
+
+  mobBar(e) {
+    const g = this.ctx;
+    const w = 14;
+    const frac = Math.max(0, e.hp / Math.max(1, e.maxHp));
+    g.fillStyle = '#000000';
+    g.fillRect(e.x + 1, e.y - 4, w, 3);
+    g.fillStyle = frac > 0.5 ? C.green : frac > 0.25 ? C.gold : C.red;
+    g.fillRect(e.x + 1, e.y - 4, Math.max(1, Math.round(w * frac)), 3);
+  }
+
+  drawItem(e, st) {
+    const img = this.itemImage(e, st);
+    if (!img) return;
+    blit(this.ctx, img, e.x, e.y);
+    if ((this.frame & 31) < 3) blit(this.ctx, IMG.ITEM_SPARKLE, e.x, e.y);
+  }
+
+  itemImage(e, st) {
+    switch (e.type) {
+      case ITEM.GOLD: return IMG.GOLD_PILE;
+      case ITEM.FOOD: return IMG.RATION;
+      case ITEM.BOMB: return IMG.ITEM_BOMB;
+      case ITEM.KEY: return IMG.ITEM_KEY;
+      case ITEM.GOLDKEY: return IMG.GOLD_KEY;
+      case ITEM.RELIC: return IMG.AMULET;
+      case ITEM.WEAPON: return IMG.SWORD_ICON;
+      case ITEM.ARMOR: return IMG.ARMOR_ICON;
+      case ITEM.SCROLL: return IMG.SCROLL;
+      case ITEM.POTION: {
+        const look = st.app?.potionLook?.[e.kind];
+        return potionImg(POTION_TINT[look] || '#FCFCFC');
+      }
+      default: return null;
+    }
   }
 
   // =========================================================================
   // Status bar
   // =========================================================================
-  drawHUD(S_) {
+  drawHUD(st) {
     const g = this.ctx;
-    g.fillStyle = C.hudBg;
-    g.fillRect(0, 0, SCREEN_W, HUD_H);
-    g.fillStyle = C.stoneDark;
-    g.fillRect(0, HUD_H - 2, SCREEN_W, 2);
-
-    textCentered(g, DUNGEON_NAME, 128, 3, 'gold');
-
-    this.drawMinimap(S_, 6, 15);
-
-    // counters
-    const P = S_.party;
-    blit(g, IMG.ITEM_KEY, 66, 14);
-    text(g, `x${String(P.keys).padStart(2, '0')}`, 82, 18, 'white');
-    blit(g, IMG.ITEM_BOMB, 66, 28);
-    text(g, `x${String(P.bombs).padStart(2, '0')}`, 82, 32, 'white');
-    blit(g, IMG.ITEM_GEM, 66, 42);
-    text(g, `x${String(Math.min(999, P.gems)).padStart(3, '0')}`, 82, 46, 'white');
-
-    // item slots
-    this.slot(112, 14, 'B', S_.bItem === 'boomerang' ? IMG.ITEM_BOOMERANG
-      : S_.bItem === 'potion' ? IMG.ITEM_POTION
-        : (P.bombs > 0 ? IMG.ITEM_BOMB : null));
-    this.slot(136, 14, 'A', IMG.SWORD_UP);
-
-    // treasures found
-    let tx = 112;
-    if (P.map) { blit(g, IMG.ITEM_MAP, tx, 42); tx += 14; }
-    if (P.compass) { blit(g, IMG.ITEM_COMPASS, tx, 42); tx += 14; }
-    if (P.skullKey) { blit(g, IMG.ITEM_SKULL_KEY, tx, 42); tx += 14; }
-
-    // hearts
-    text(g, '-LIFE-', 176, 14, 'red');
-    const hearts = Math.ceil(S_.me.maxHp / 2);
-    for (let i = 0; i < hearts; i++) {
-      const col = i % 8, row = (i / 8) | 0;
-      const left = S_.me.hp - i * 2;
-      const img = left >= 2 ? IMG.HEART_FULL : left === 1 ? IMG.HEART_HALF : IMG.HEART_EMPTY;
-      blit(g, img, 168 + col * 9, 24 + row * 9);
-    }
-
-    // party roster
-    let px = 6;
-    for (const m of S_.partyList) {
-      g.fillStyle = TUNIC_DOT[m.colourIdx] || C.white;
-      g.fillRect(px, 57, 4, 4);
-      const n = Math.max(0, Math.ceil(m.hp / 2));
-      text(g, m.ghost ? '--' : String(n).padStart(2, '0'), px + 6, 56,
-        m.ghost ? 'grey' : (m.hp <= 2 ? 'red' : 'white'), 6);
-      px += 26;
-    }
-  }
-
-  slot(x, y, label, img) {
-    const g = this.ctx;
-    g.fillStyle = C.stoneDark;
-    g.fillRect(x, y, 20, 22);
-    g.fillStyle = C.black;
-    g.fillRect(x + 1, y + 5, 18, 16);
-    text(g, label, x + 7, y - 3, 'white', 6);
-    if (img) blit(g, img, x + 2, y + 5);
-  }
-
-  drawMinimap(S_, mx, my) {
-    const g = this.ctx;
-    const cw = 7, ch = 5;
     g.fillStyle = C.panel;
-    g.fillRect(mx - 1, my - 1, GRID_W * cw + 2, GRID_H * ch + 2);
+    g.fillRect(0, 0, SCREEN_W, HUD_H);
+    g.fillStyle = C.dark;
+    g.fillRect(0, HUD_H - 1, SCREEN_W, 1);
 
-    for (const [id, info] of S_.map) {
-      const def = ROOM_BY_ID.get(id);
-      if (!def) continue;
-      const x = mx + def.gx * cw, y = my + def.gy * ch;
-      if (info.visited) {
-        g.fillStyle = '#3858A8';
-        g.fillRect(x, y, cw - 1, ch - 1);
-      } else {
-        g.fillStyle = '#202038';
-        g.fillRect(x, y, cw - 1, ch - 1);
+    this.drawMinimap(st, 3, 8);
+
+    const region = regionOf(st.depth);
+    const me = st.me;
+    text(g, `FLOOR ${String(st.depth).padStart(2, '0')}`, 42, 3, 'gold', 7);
+    text(g, region.name, 42, 12, 'grey', 6);
+
+    const hpFrac = Math.max(0, me.hp / Math.max(1, me.maxHp));
+    this.bar(42, 21, 92, 6, hpFrac, hpFrac > 0.5 ? C.green : hpFrac > 0.25 ? C.gold : C.red);
+    text(g, `${me.hp}/${me.maxHp}`, 138, 21, 'white', 6);
+
+    this.bar(42, 29, 92, 4, Math.min(1, me.xp / Math.max(1, me.xpNext)), C.blue);
+    text(g, `LV${me.level}`, 138, 29, 'blue', 6);
+
+    const hunger = Math.max(0, Math.min(1, me.hunger / HUNGER_MAX));
+    this.bar(42, 36, 92, 3, hunger, hunger > 0.25 ? '#B07030' : C.red);
+    text(g, hunger > 0 ? 'FED' : 'STARVED', 138, 36, hunger > 0 ? 'grey' : 'red', 6);
+
+    blit(g, IMG.GOLD_PILE, 170, -2);
+    text(g, String(me.gold), 186, 3, 'gold', 6);
+    text(g, CLASSES[me.cls]?.name || '', 236, 3, 'grey', 6);
+
+    for (let i = 0; i < 8; i++) {
+      const x = 180 + i * 17;
+      const slot = st.inv[i];
+      g.fillStyle = slot ? C.dark : '#0A0C14';
+      g.fillRect(x, 13, 16, 16);
+      g.fillStyle = '#000000';
+      g.fillRect(x + 1, 14, 14, 14);
+      if (slot) {
+        const img = this.itemImage({ type: slot.item.type, kind: slot.item.kind }, st);
+        if (img) blit(g, img, x, 13);
+        if (slot.count > 1) text(g, String(slot.count), x + 9, 23, 'white', 6);
       }
-      if (S_.party.compass) {
-        if (info.boss) { g.fillStyle = C.red; g.fillRect(x + 2, y + 1, 2, 2); }
-        else if (info.item) { g.fillStyle = C.gold; g.fillRect(x + 2, y + 1, 2, 2); }
+      text(g, String(i + 1), x + 5, 31, slot ? 'grey' : 'dark', 6);
+    }
+
+    let px = 42;
+    for (const m of st.party) {
+      g.fillStyle = CLASS_DOT[m.cls] || C.white;
+      g.fillRect(px, 42, 3, 3);
+      const label = m.ghost ? 'DOWN' : String(m.hp);
+      text(g, `${m.name.slice(0, 4)} ${label} F${m.depth}`, px + 5, 41,
+        m.ghost ? 'red' : (m.id === st.myId ? 'white' : 'grey'), 6);
+      px += 68;
+    }
+  }
+
+  bar(x, y, w, h, frac, colour) {
+    const g = this.ctx;
+    g.fillStyle = '#000000';
+    g.fillRect(x, y, w, h);
+    g.fillStyle = colour;
+    g.fillRect(x + 1, y + 1, Math.max(0, Math.round((w - 2) * frac)), h - 2);
+  }
+
+  /** One pixel per tile — the whole floor fits in the corner of the bar. */
+  drawMinimap(st, mx, my) {
+    const g = this.ctx;
+    g.fillStyle = '#000000';
+    g.fillRect(mx - 1, my - 1, LEVEL_W + 2, LEVEL_H + 2);
+
+    const tiles = st.tiles, seen = st.explored, fov = st.fov;
+    for (let y = 0; y < LEVEL_H; y++) {
+      for (let x = 0; x < LEVEL_W; x++) {
+        const i = idx(x, y);
+        if (!seen[i]) continue;
+        const t = tiles[i];
+        let col;
+        if (t === TT.WALL || t === TT.WALL_DECO) col = '#22283A';
+        else if (t === TT.EXIT || t === TT.LOCKED_EXIT) col = C.gold;
+        else if (t === TT.ENTRANCE) col = '#C0C0D8';
+        else if (t === TT.LOCKED_DOOR) col = '#F8B800';
+        else if (t === TT.DOOR || t === TT.OPEN_DOOR) col = '#8C6A28';
+        else if (t === TT.WATER) col = '#25507A';
+        else if (t === TT.CHASM) col = '#000000';
+        else col = fov[i] ? '#5A6480' : '#3A4058';
+        g.fillStyle = col;
+        g.fillRect(mx + x, my + y, 1, 1);
       }
     }
-    // teammates, then you on top
-    for (const m of S_.partyList) {
-      const def = ROOM_BY_ID.get(m.room);
-      if (!def || m.id === S_.myId) continue;
-      g.fillStyle = TUNIC_DOT[m.colourIdx] || C.white;
-      g.fillRect(mx + def.gx * cw + 1, my + def.gy * ch + 1, 3, 3);
+    for (const m of st.party) {
+      if (m.depth !== st.depth || m.tile == null || m.id === st.myId) continue;
+      g.fillStyle = CLASS_DOT[m.cls] || C.white;
+      g.fillRect(mx + tx(m.tile), my + ty(m.tile), 1, 1);
     }
-    const here = ROOM_BY_ID.get(S_.room.id);
-    if (here && (this.frame >> 3) % 2 === 0) {
+    if ((this.frame >> 3) % 2 === 0) {
       g.fillStyle = C.white;
-      g.fillRect(mx + here.gx * cw + 1, my + here.gy * ch + 1, 3, 3);
+      g.fillRect(mx + ((st.me.x + 8) >> 4), my + ((st.me.y + 8) >> 4), 1, 1);
     }
   }
 
   // =========================================================================
-  // Overlays and full screens
+  // Overlays
   // =========================================================================
   banner(msg) {
     if (!msg) return;
     const g = this.ctx;
-    const w = textWidth(msg) + 12;
-    const x = Math.round(128 - w / 2);
-    const y = HUD_H + 12;
-    g.fillStyle = C.black;
-    g.fillRect(x, y, w, 18);
+    const w = textWidth(msg, 7) + 12;
+    const x = Math.round(SCREEN_W / 2 - w / 2);
+    const y = HUD_H + 8;
+    g.fillStyle = 'rgba(0,0,0,0.85)';
+    g.fillRect(x, y, w, 16);
     g.fillStyle = C.gold;
     g.fillRect(x, y, w, 1);
-    g.fillRect(x, y + 17, w, 1);
-    g.fillRect(x, y, 1, 18);
-    g.fillRect(x + w - 1, y, 1, 18);
-    textCentered(g, msg, 128, y + 5, 'white');
+    g.fillRect(x, y + 15, w, 1);
+    textCentered(g, msg, SCREEN_W / 2, y + 4, 'white', 7);
+  }
+
+  bossBanner() {
+    const e = this.boss;
+    if (!e) return;
+    const g = this.ctx;
+    const st = MOBS[e.kind];
+    const frac = Math.max(0, e.hp / Math.max(1, e.maxHp));
+    g.fillStyle = 'rgba(0,0,0,0.8)';
+    g.fillRect(40, SCREEN_H - 20, SCREEN_W - 80, 16);
+    textCentered(g, st?.name || 'BOSS', SCREEN_W / 2, SCREEN_H - 19, 'red', 6);
+    this.bar(44, SCREEN_H - 11, SCREEN_W - 88, 5, frac, C.red);
+  }
+
+  prompt(msg) {
+    textCentered(this.ctx, msg, SCREEN_W / 2, SCREEN_H - 12, 'gold', 7);
+  }
+
+  // =========================================================================
+  // Screens
+  // =========================================================================
+  frameBox() {
+    const g = this.ctx;
+    const wall = TILE_IMG.prison?.[TT.WALL];
+    if (!wall) return;
+    for (let x = 0; x < SCREEN_W; x += TILE) {
+      g.drawImage(wall, x, 0);
+      g.drawImage(wall, x, SCREEN_H - TILE);
+    }
+    for (let y = TILE; y < SCREEN_H - TILE; y += TILE) {
+      g.drawImage(wall, 0, y);
+      g.drawImage(wall, SCREEN_W - TILE, y);
+    }
   }
 
   drawTitle(ui) {
     const g = this.ctx;
-    this.clear('#05050C');
-    // a torchlit stone frame
-    for (let x = 0; x < SCREEN_W; x += TILE) {
-      g.drawImage(TILE_IMG[T.WALL], x, 0);
-      g.drawImage(TILE_IMG[T.WALL], x, SCREEN_H - TILE);
-    }
-    for (let y = TILE; y < SCREEN_H - TILE; y += TILE) {
-      g.drawImage(TILE_IMG[T.WALL], 0, y);
-      g.drawImage(TILE_IMG[T.WALL], SCREEN_W - TILE, y);
-    }
+    this.clear('#05070E');
+    this.frameBox();
+    textCentered(g, 'PIXEL DUNGEON', SCREEN_W / 2, 26, 'gold');
+    textCentered(g, 'TWENTY-FIVE FLOORS DOWN', SCREEN_W / 2, 40, 'grey', 7);
 
-    textCentered(g, 'THE SUNKEN', 128, 34, 'gold');
-    textCentered(g, 'CRYPT', 128, 46, 'gold');
-    textCentered(g, 'A PIXEL DUNGEON FOR 1-4', 128, 64, 'grey');
-
-    blit(g, IMG.HERO_S1 && HERO_IMG.green.HERO_S1, 96, 84);
-    blit(g, IMG.BONE1, 116, 84);
-    blit(g, IMG.SLIME1, 136, 84);
+    CLASS_ORDER.forEach((cls, i) => {
+      blit(g, HERO_IMG[cls]?.HERO_S1, 108 + i * 28, 54);
+    });
 
     if (ui.screen === 'name') {
-      textCentered(g, 'WHO ENTERS?', 128, 116, 'white');
-      this.field(ui.name, 128, 132, 8);
-      textCentered(g, 'TYPE A NAME, THEN ENTER', 128, 154, 'grey');
+      textCentered(g, 'WHO GOES DOWN?', SCREEN_W / 2, 88, 'white', 7);
+      this.field(ui.name, SCREEN_W / 2, 104, 8);
+      textCentered(g, 'TYPE A NAME, THEN ENTER', SCREEN_W / 2, 128, 'grey', 7);
+    } else if (ui.screen === 'class') {
+      textCentered(g, 'CHOOSE YOUR HERO', SCREEN_W / 2, 82, 'white', 7);
+      CLASS_ORDER.forEach((cls, i) => {
+        const sel = ui.cls === i;
+        const y = 96 + i * 18;
+        const def = CLASSES[cls];
+        if (sel) { g.fillStyle = '#1A2036'; g.fillRect(44, y - 4, 232, 17); }
+        blit(g, HERO_IMG[cls]?.HERO_S1, 48, y - 4);
+        text(g, def.name, 68, y, sel ? 'gold' : 'white', 7);
+        text(g, def.blurb, 128, y + 1, sel ? 'white' : 'dark', 5);
+      });
+      textCentered(g, 'ARROWS + ENTER', SCREEN_W / 2, 176, 'grey', 7);
     } else if (ui.screen === 'menu') {
-      const opts = ['HOST A NEW PARTY', 'JOIN WITH A CODE', 'PLAY ALONE'];
+      const opts = ['HOST A PARTY', 'JOIN WITH A CODE', 'DELVE ALONE'];
       opts.forEach((o, i) => {
         const sel = ui.sel === i;
-        textCentered(g, `${sel ? '>' : ' '} ${o}`, 128, 120 + i * 14, sel ? 'gold' : 'white');
+        textCentered(g, `${sel ? '>' : ' '} ${o}`, SCREEN_W / 2, 96 + i * 16, sel ? 'gold' : 'white', 7);
       });
-      textCentered(g, 'ARROWS + ENTER', 128, 170, 'grey');
+      textCentered(g, 'ARROWS + ENTER', SCREEN_W / 2, 156, 'grey', 7);
     } else if (ui.screen === 'code') {
-      textCentered(g, 'PARTY CODE', 128, 116, 'white');
-      this.field(ui.code, 128, 132, 4);
-      textCentered(g, 'ENTER TO JOIN, ESC TO GO BACK', 128, 154, 'grey');
+      textCentered(g, 'PARTY CODE', SCREEN_W / 2, 92, 'white', 7);
+      this.field(ui.code, SCREEN_W / 2, 108, 4);
+      textCentered(g, 'ENTER TO JOIN, ESC TO GO BACK', SCREEN_W / 2, 132, 'grey', 7);
     }
 
-    if (ui.error) textCentered(g, ui.error, 128, 178, 'red');
-    textCentered(g, 'ARROWS MOVE  Z SWORD  X ITEM', 128, 196, 'grey');
-    textCentered(g, 'C SWAPS ITEM  M MUTES', 128, 208, 'grey');
+    if (ui.error) textCentered(g, ui.error, SCREEN_W / 2, 190, 'red', 7);
+    textCentered(g, 'ARROWS MOVE   Z ATTACK   X ABILITY', SCREEN_W / 2, 204, 'grey', 7);
+    textCentered(g, 'E STAIRS   1-8 ITEMS   M MUTE', SCREEN_W / 2, 214, 'grey', 7);
   }
 
   field(value, cx, y, len) {
@@ -550,7 +479,7 @@ export class Renderer {
     const x = Math.round(cx - w / 2);
     g.fillStyle = C.panel;
     g.fillRect(x, y - 4, w, 16);
-    g.fillStyle = C.stoneMid;
+    g.fillStyle = C.mid;
     g.fillRect(x, y - 4, w, 1);
     g.fillRect(x, y + 11, w, 1);
     for (let i = 0; i < len; i++) {
@@ -566,87 +495,58 @@ export class Renderer {
     }
   }
 
-  drawLobby(ui, S_) {
+  drawLobby(ui) {
     const g = this.ctx;
-    this.clear('#05050C');
-    for (let x = 0; x < SCREEN_W; x += TILE) {
-      g.drawImage(TILE_IMG[T.WALL], x, 0);
-      g.drawImage(TILE_IMG[T.WALL], x, SCREEN_H - TILE);
-    }
-    textCentered(g, 'PARTY CODE', 128, 26, 'grey');
-    textCentered(g, ui.code, 128, 40, 'gold');
-    textCentered(g, 'SHARE IT - UP TO 4 HEROES', 128, 58, 'grey');
+    this.clear('#05070E');
+    this.frameBox();
+    textCentered(g, 'PARTY CODE', SCREEN_W / 2, 26, 'grey', 7);
+    textCentered(g, ui.code, SCREEN_W / 2, 38, 'gold');
+    textCentered(g, 'SHARE IT - UP TO 4 HEROES', SCREEN_W / 2, 56, 'grey', 7);
 
     ui.players.forEach((p, i) => {
-      const y = 80 + i * 22;
-      const set = HERO_IMG[p.colour] || HERO_IMG.green;
-      blit(g, set.HERO_S1, 60, y - 4);
-      text(g, p.name, 82, y, p.ready ? 'green' : 'white');
-      text(g, p.ready ? 'READY' : '...', 160, y, p.ready ? 'green' : 'grey');
+      const y = 80 + i * 24;
+      blit(g, HERO_IMG[p.cls]?.HERO_S1, 70, y - 4);
+      text(g, p.name, 92, y, p.ready ? 'green' : 'white', 7);
+      text(g, CLASSES[p.cls]?.name || '', 152, y, 'grey', 7);
+      text(g, p.ready ? 'READY' : '...', 218, y, p.ready ? 'green' : 'grey', 7);
     });
 
-    textCentered(g, 'PRESS ENTER WHEN READY', 128, 188, 'white');
-    textCentered(g, 'THE CRYPT OPENS ONCE', 128, 204, 'grey');
-    textCentered(g, 'EVERY HERO IS READY', 128, 214, 'grey');
+    textCentered(g, 'C CHANGES CLASS   ENTER WHEN READY', SCREEN_W / 2, 192, 'white', 7);
+    textCentered(g, 'THE DUNGEON OPENS WHEN ALL ARE READY', SCREEN_W / 2, 208, 'grey', 6);
   }
 
-  drawGameOver(t) {
+  drawEnd(stats, won) {
     const g = this.ctx;
-    g.fillStyle = 'rgba(0,0,0,0.75)';
-    g.fillRect(0, HUD_H, PLAY_W, PLAY_H);
-    textCentered(g, 'THE PARTY HAS FALLEN', 128, HUD_H + 60, 'red');
-    textCentered(g, 'THE CRYPT DRAWS YOU BACK...', 128, HUD_H + 80, 'grey');
-  }
-
-  drawWin(stats) {
-    const g = this.ctx;
-    this.clear('#05050C');
-    for (let x = 0; x < SCREEN_W; x += TILE) {
-      g.drawImage(TILE_IMG[T.WALL], x, 0);
-      g.drawImage(TILE_IMG[T.WALL], x, SCREEN_H - TILE);
+    this.clear('#05070E');
+    this.frameBox();
+    if (won) {
+      blit(g, IMG.AMULET, SCREEN_W / 2 - 8, 24);
+      textCentered(g, 'THE AMULET IS YOURS', SCREEN_W / 2, 46, 'gold');
+      textCentered(g, 'THE DUNGEON IS BEATEN', SCREEN_W / 2, 60, 'grey', 7);
+    } else {
+      textCentered(g, 'THE PARTY HAS FALLEN', SCREEN_W / 2, 40, 'red');
+      textCentered(g, 'THE DUNGEON KEEPS WHAT IT TAKES', SCREEN_W / 2, 56, 'grey', 7);
     }
-    blit(g, IMG.ITEM_RELIC, 120, 30);
-    textCentered(g, 'THE RELIC IS YOURS', 128, 56, 'gold');
-    textCentered(g, 'THE SUNKEN CRYPT IS QUIET', 128, 70, 'grey');
 
     const mm = String(Math.floor(stats.time / 60)).padStart(2, '0');
     const ss = String(stats.time % 60).padStart(2, '0');
-    text(g, `TIME    ${mm}:${ss}`, 60, 96, 'white');
-    text(g, `SLAIN   ${String(stats.kills).padStart(3, '0')}`, 60, 108, 'white');
-    text(g, `FALLEN  ${String(stats.deaths).padStart(3, '0')}`, 60, 120, 'white');
-    text(g, `GEMS    ${String(stats.gems).padStart(3, '0')}`, 60, 132, 'white');
+    text(g, `DEEPEST FLOOR  ${String(stats.deepest).padStart(2, '0')}`, 80, 82, 'white', 7);
+    text(g, `TIME           ${mm}:${ss}`, 80, 94, 'white', 7);
+    text(g, `SLAIN          ${String(stats.kills).padStart(3, '0')}`, 80, 106, 'white', 7);
+    text(g, `FALLEN         ${String(stats.deaths).padStart(3, '0')}`, 80, 118, 'white', 7);
 
-    stats.players.forEach((p, i) => {
-      const set = HERO_IMG[p.colour] || HERO_IMG.green;
-      blit(g, set.HERO_S1, 60, 150 + i * 16);
-      text(g, `${p.name}  ${String(p.kills).padStart(3, '0')}`, 80, 154 + i * 16, 'white');
+    (stats.players || []).forEach((p, i) => {
+      const y = 138 + i * 16;
+      blit(g, HERO_IMG[p.cls]?.HERO_S1, 74, y - 4);
+      text(g, `${p.name} LV${String(p.level).padStart(2, '0')} ${String(p.kills).padStart(3, '0')} SLAIN`,
+        94, y, 'white', 6);
     });
 
-    textCentered(g, 'PRESS ENTER TO DELVE AGAIN', 128, 210, 'gold');
+    textCentered(g, 'PRESS ENTER TO DELVE AGAIN', SCREEN_W / 2, 212, 'gold', 7);
   }
 
   drawConnecting(msg) {
-    this.clear('#05050C');
-    textCentered(this.ctx, msg, 128, 112, 'white');
+    this.clear('#05070E');
+    textCentered(this.ctx, msg, SCREEN_W / 2, SCREEN_H / 2 - 4, 'white', 7);
   }
 }
-
-const TUNIC_DOT = ['#00A800', '#0078F8', '#F83800', '#9840F8'];
-
-const DROP_SPRITE = {
-  [PICKUP.HEART]: 'ITEM_HEART',
-  [PICKUP.GEM]: 'ITEM_GEM',
-  [PICKUP.GEM_BIG]: 'ITEM_GEM_BIG',
-  [PICKUP.BOMB]: 'ITEM_BOMB',
-  [PICKUP.KEY]: 'ITEM_KEY',
-  [PICKUP.FAIRY]: 'ITEM_FAIRY',
-  [PICKUP.CLOCK]: 'ITEM_CLOCK',
-  [PICKUP.MAP]: 'ITEM_MAP',
-  [PICKUP.COMPASS]: 'ITEM_COMPASS',
-  [PICKUP.BOOMERANG]: 'ITEM_BOOMERANG',
-  [PICKUP.BOMBBAG]: 'ITEM_BOMBBAG',
-  [PICKUP.HEART_CONTAINER]: 'ITEM_HEART_CONTAINER',
-  [PICKUP.SKULL_KEY]: 'ITEM_SKULL_KEY',
-  [PICKUP.RELIC]: 'ITEM_RELIC',
-  [PICKUP.POTION]: 'ITEM_POTION',
-};

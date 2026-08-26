@@ -39,6 +39,9 @@ export const PAL = {
   'n': '#D800CC',     // magenta
   'o': '#F878F8',     // pink
 
+  'p': '#2C8C2C',     // grass
+  'q': '#164C18',     // grass shadow
+
   'A': '#0A0A12',     // dungeon floor
   'B': '#16162A',     // floor grout
   'C': '#26264A',     // floor edge
@@ -55,6 +58,7 @@ export const PAL = {
   'V': '#808098',     // stone
   'X': '#404058',     // stone dark
 
+  'W': '#FCFCFC',     // potion liquid — recoloured per appearance
   'Y': '#F8F0C0',     // relic glow
   'Z': '#806000',     // gold shadow
 };

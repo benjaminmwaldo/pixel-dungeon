@@ -10,7 +10,7 @@ let noiseBuf = null;
 let timer = null;
 let step = 0;
 let nextTime = 0;
-let track = 'dungeon';
+let track = 'sewers';
 export let muted = false;
 
 const A4 = 440;
@@ -128,9 +128,18 @@ const FX = {
   win:     () => { [523, 659, 784, 1046, 988, 1046, 1319].forEach((f, i) => tone(f, 0.3, { vol: 0.18, at: i * 0.16 })); },
 };
 
+// The dungeon fires more event names than there are distinct sounds; these
+// map the new ones onto the voices that already exist.
+const ALIAS = {
+  swing: 'sword', gold: 'gem', levelup: 'item', unlock: 'key', stairs: 'door',
+  trap: 'hurt', shoot: 'throw', arrow: 'throw', bolt: 'magic', drink: 'heart',
+  read: 'secret', eat: 'pickup', equip: 'item', teleport: 'magic',
+  blink: 'magic', summon: 'boss', roar: 'boss', frost: 'magic', cloak: 'magic',
+};
+
 export function sfx(name) {
   if (!ctx || muted) return;
-  const f = FX[name];
+  const f = FX[name] || FX[ALIAS[name]];
   if (f) f();
 }
 
@@ -139,9 +148,9 @@ export function sfx(name) {
 // ---------------------------------------------------------------------------
 const R = null;
 const TRACKS = {
-  // Slow, circling, a little unresolved. D minor with a flat second.
-  dungeon: {
-    stepMs: 165,
+  // Each chapter gets its own loop: same chip voices, different key and pulse.
+  sewers: {
+    stepMs: 168,
     bass: [38, R, 38, R, 39, R, 38, R, 36, R, 36, R, 33, R, 35, R,
            38, R, 38, R, 41, R, 40, R, 38, R, 36, R, 38, R, R, R],
     lead: [62, R, R, 65, R, R, 63, R, 62, R, R, 60, R, R, R, R,
@@ -149,9 +158,44 @@ const TRACKS = {
     drum: [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0,
            1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 2],
   },
-  // Boss: same key, twice the pulse, no melody to hide behind.
+  prison: {
+    stepMs: 150,
+    bass: [33, R, 33, 33, R, 34, R, 33, 31, R, 31, 31, R, 30, R, 31,
+           33, R, 33, 33, R, 36, R, 35, 33, R, 31, R, 33, R, R, R],
+    lead: [57, R, 60, R, 58, R, 57, R, 55, R, 57, R, 58, R, R, R,
+           60, R, 62, R, 60, R, 58, R, 57, R, 55, R, 53, R, R, R],
+    drum: [1, 0, 0, 2, 1, 0, 0, 0, 1, 0, 0, 2, 1, 0, 2, 0,
+           1, 0, 0, 2, 1, 0, 0, 0, 1, 0, 2, 0, 1, 2, 2, 0],
+  },
+  caves: {
+    stepMs: 140,
+    bass: [31, R, R, 31, 34, R, 31, R, 29, R, R, 29, 33, R, 29, R,
+           31, R, R, 31, 36, R, 34, R, 31, R, 30, R, 29, R, R, R],
+    lead: [55, R, 58, R, R, 60, R, 58, 55, R, 53, R, R, 55, R, R,
+           50, R, 53, R, R, 55, R, 58, 60, R, 58, R, 55, R, R, R],
+    drum: [1, 0, 0, 0, 2, 0, 1, 0, 1, 0, 0, 0, 2, 0, 1, 2,
+           1, 0, 0, 0, 2, 0, 1, 0, 1, 0, 2, 0, 1, 2, 2, 2],
+  },
+  city: {
+    stepMs: 132,
+    bass: [36, R, 36, R, 43, R, 41, R, 40, R, 40, R, 38, R, 36, R,
+           36, R, 36, R, 43, R, 45, R, 43, R, 41, R, 40, R, R, R],
+    lead: [72, R, 71, R, 69, R, 67, R, 69, R, 71, R, 72, R, R, R,
+           76, R, 74, R, 72, R, 71, R, 69, R, 67, R, 69, R, R, R],
+    drum: [1, 0, 2, 0, 1, 0, 2, 0, 1, 0, 2, 0, 1, 0, 2, 2,
+           1, 0, 2, 0, 1, 0, 2, 0, 1, 0, 2, 0, 1, 2, 2, 2],
+  },
+  halls: {
+    stepMs: 122,
+    bass: [30, 30, R, 30, 31, R, 30, R, 28, 28, R, 28, 29, R, 28, R,
+           30, 30, R, 30, 33, R, 32, R, 30, R, 29, R, 28, R, R, R],
+    lead: [66, R, 65, R, 66, R, 69, R, 68, R, 66, R, 65, R, 66, R,
+           61, R, 62, R, 65, R, 66, R, 69, R, 68, R, 66, R, R, R],
+    drum: [1, 2, 0, 2, 1, 0, 2, 0, 1, 2, 0, 2, 1, 2, 2, 2,
+           1, 2, 0, 2, 1, 0, 2, 0, 1, 2, 0, 2, 1, 2, 2, 2],
+  },
   boss: {
-    stepMs: 105,
+    stepMs: 102,
     bass: [38, 38, R, 38, 39, R, 38, R, 36, 36, R, 36, 37, R, 36, R,
            38, 38, R, 38, 41, R, 40, R, 38, 38, R, 37, 36, R, 35, R],
     lead: [74, R, 73, R, 74, R, 77, R, 76, R, 74, R, 73, R, 74, R,

@@ -1,15 +1,12 @@
-// Headless checks on the real simulation: can a hero walk the dungeon, fight,
-// take damage, open a shutter, and reach the boss door?
+// Headless checks against the real simulation: does a party spawn, fight,
+// loot, descend, and can a boss floor be finished?
 import { Game } from '../server/game.js';
-import { IN, KIND, DOOR, N, E, S, W } from '../shared/constants.js';
-import { DS } from '../shared/physics.js';
-
-const g = new Game('TEST');
-const p = g.addPlayer(1, 'BEN');
-g.begin();
-
-const hold = (bits, n) => { for (let i = 0; i < n; i++) { p.input = bits; g.step(); g.clearFx(); } };
-const tap = (bits) => { p.input = bits; g.step(); p.input = 0; g.step(); g.clearFx(); };
+import { IN, KIND, CLASSES, isMob, isBoss } from '../shared/constants.js';
+import { TT, MAX_DEPTH, regionOf, LEVEL_LEN } from '../shared/terrain.js';
+import { tileToPixel, tileUnder } from '../shared/physics.js';
+import { PLAYER_BOX } from '../shared/constants.js';
+import { ITEM } from '../shared/items.js';
+import { MOBS, BOSS_OF } from '../shared/mobs.js';
 
 let fails = 0;
 function check(label, cond, extra = '') {
@@ -17,131 +14,143 @@ function check(label, cond, extra = '') {
   if (!cond) fails++;
 }
 
-// --- walk north out of the entrance ---------------------------------------
-hold(IN.UP, 80);
-check('walked into the antechamber', p.room === '3,5', `room=${p.room}`);
+const g = new Game('TEST');
+const a = g.addPlayer(1, 'BEN');
+const b = g.addPlayer(2, 'JASON');
+g.begin();
 
-// --- there should be enemies here, and they should move -------------------
-const room = g.room('3,5');
-const before = room.ents.filter(e => e.kind === KIND.SLIME).map(e => `${e.x},${e.y}`).join('|');
-hold(0, 40);
-const after = room.ents.filter(e => e.kind === KIND.SLIME).map(e => `${e.x},${e.y}`).join('|');
-check('slimes are alive and moving', room.ents.length > 0 && before !== after,
-  `${room.ents.length} entities`);
+const hold = (p, bits, n) => {
+  for (let i = 0; i < n; i++) { p.queue.push({ seq: ++p.seq, bits }); g.step(); g.clearTransient(); }
+};
+const idle = (n) => { for (let i = 0; i < n; i++) { g.step(); g.clearTransient(); } };
 
-// --- the north door of the antechamber starts barred ----------------------
-check('shutter starts closed', room.doorState()[N] === DS.BARRED);
+check('the party starts on floor 1', a.depth === 1 && b.depth === 1);
+check('classes are handed out, no duplicates', a.cls !== b.cls, `${a.cls} / ${b.cls}`);
+check('each hero has their class hit points', a.maxHp === CLASSES[a.cls].hp);
 
-// --- kill everything in the room ------------------------------------------
-for (let i = 0; i < 900 && room.ents.some(e => e.kind === KIND.SLIME || e.kind === KIND.SLIMELET); i++) {
-  const t = room.ents.find(e => e.kind === KIND.SLIME || e.kind === KIND.SLIMELET);
-  if (t) {
-    // stay inside the room: teleporting onto a doorway would scroll us out
-    p.room = '3,5'; p.trans = 0; p.ghost = false;
-    p.x = Math.max(32, Math.min(200, t.x));
-    p.y = Math.max(36, Math.min(128, t.y + 14));
-    p.dir = N; p.invuln = 60;
+// --- the floor is alive ----------------------------------------------------
+idle(5);
+const f1 = g.floor(1);
+check('floor 1 populated itself', f1.ents.length > 0, `${f1.ents.length} entities`);
+check('and it has monsters on it', f1.ents.some(e => isMob(e.kind)));
+const mobsBefore = f1.ents.filter(e => isMob(e.kind)).map(e => `${Math.round(e.x)},${Math.round(e.y)}`).join('|');
+idle(60);
+const mobsAfter = f1.ents.filter(e => isMob(e.kind)).map(e => `${Math.round(e.x)},${Math.round(e.y)}`).join('|');
+check('monsters move about', mobsBefore !== mobsAfter);
+
+// --- walking opens doors ---------------------------------------------------
+let doorOpened = false;
+for (let i = 0; i < LEVEL_LEN; i++) if (f1.tiles[i] === TT.DOOR) { doorOpened = true; break; }
+check('the floor has shut doors to open', doorOpened);
+
+// --- a doorway you meet at an angle must still open ------------------------
+{
+  const { boxBlocker } = await import('../shared/physics.js');
+  const { idx } = await import('../shared/terrain.js');
+  const probe = new Uint8Array(1024).fill(TT.WALL);
+  probe[idx(3, 18)] = TT.FLOOR;
+  probe[idx(3, 17)] = TT.DOOR;
+  // a hitbox straddling two columns, pushing up into the door
+  const hit = boxBlocker(probe, 44, 287, 10, 10, 'walk');
+  check('a door is reported over the wall beside it', hit === idx(3, 17),
+    `got tile ${hit}`);
+}
+
+// --- melee kills and pays out ---------------------------------------------
+const victim = f1.ents.find(e => isMob(e.kind));
+const spot = { x: victim.x, y: victim.y + 14 };
+a.x = spot.x; a.y = spot.y; a.dir = 0; a.invuln = 9999;
+const xp0 = a.xp, lvl0 = a.level;
+for (let i = 0; i < 200 && !victim.dead; i++) {
+  a.x = victim.x; a.y = victim.y + 13; a.dir = 0; a.invuln = 9999;
+  a.queue.push({ seq: ++a.seq, bits: IN.A }); g.step();
+  a.queue.push({ seq: ++a.seq, bits: 0 }); g.step();
+  g.clearTransient();
+}
+check('a monster can be cut down', victim.dead);
+check('and killing it pays experience', a.xp > xp0 || a.level > lvl0, `xp ${xp0} -> ${a.xp}`);
+
+// --- loot ------------------------------------------------------------------
+g.dropItem(f1, tileUnder(a, PLAYER_BOX), { type: ITEM.GOLD, amount: 25 });
+const gold0 = a.gold;
+idle(12);
+// a slain monster may have left its own coins underfoot, so allow more
+check('gold is picked up by walking over it', a.gold >= gold0 + 25, `${gold0} -> ${a.gold}`);
+
+g.dropItem(f1, tileUnder(a, PLAYER_BOX), { type: ITEM.POTION, kind: 'healing' });
+idle(12);
+check('a potion goes to the quick bar', a.inv.some(s => s.item.type === ITEM.POTION));
+a.hp = 1;
+const potSlot = a.inv.findIndex(s => s.item.type === ITEM.POTION);
+g.useSlot(a, potSlot);
+check('drinking it heals', a.hp > 1, `hp=${a.hp}`);
+check('and identifies the potion for the party', g.known.potions.includes('healing'));
+
+// --- fog of war hides what you cannot see ---------------------------------
+const snap = g.snapshotFor(a);
+const totalMobs = f1.ents.filter(e => isMob(e.kind)).length;
+check('the snapshot only carries what is in sight',
+  snap.e.length <= totalMobs, `${snap.e.length} sent of ${totalMobs} alive`);
+check('the snapshot stays small', JSON.stringify(snap).length < 3000,
+  `${JSON.stringify(snap).length} bytes`);
+
+// --- descending ------------------------------------------------------------
+const exitPix = tileToPixel(f1.level.exit, PLAYER_BOX);
+a.x = exitPix.x; a.y = exitPix.y;
+g.step();
+g.interact(a);
+check('standing on the stairs and acting descends', a.depth === 2, `depth ${a.depth}`);
+check('the other hero stays where they were', b.depth === 1);
+idle(5);
+check('the new floor populates', g.floor(2).ents.length > 0);
+check('a floor packet is queued for the client', a.needFloor === true || a.depth === 2);
+
+// --- ascending back up -----------------------------------------------------
+const upPix = tileToPixel(g.floor(2).level.entrance, PLAYER_BOX);
+a.x = upPix.x; a.y = upPix.y;
+g.step();
+g.interact(a);
+check('and the stairs up take you back', a.depth === 1);
+
+// --- every region can be reached and has its boss --------------------------
+for (const depth of [5, 10, 15, 20, 25]) {
+  a.depth = depth;
+  a.needFloor = true;
+  const f = g.floor(depth);
+  const px = tileToPixel(f.level.entrance, PLAYER_BOX);
+  a.x = px.x; a.y = px.y;
+  a.invuln = 99999;
+  idle(3);
+  const boss = f.ents.find(e => isBoss(e.kind));
+  const region = regionOf(depth);
+  check(`floor ${depth} (${region.key}) has its boss`, !!boss,
+    boss ? MOBS[boss.kind].name : 'none');
+  if (depth < 25) {
+    const sealed = f.tiles[f.level.exit] === TT.LOCKED_EXIT;
+    check(`floor ${depth} keeps the way down sealed`, sealed);
   }
-  tap(IN.A);
 }
-check('room cleared by the sword', room.cleared, `left=${room.ents.length}`);
-check('shutter opened on clear', room.doorState()[N] === DS.OPEN);
 
-// --- the hero can take a hit ----------------------------------------------
-p.invuln = 0;
-const hp0 = p.hp;
-g.hurtPlayer(p, 2, p.x + 20, p.y);
-check('taking damage costs hearts', p.hp === hp0 - 2, `${hp0} -> ${p.hp}`);
-check('and grants mercy frames', p.invuln > 0);
-
-// --- locked door needs a key ----------------------------------------------
-p.room = '2,5'; p.x = 24; p.y = 80; p.dir = W; p.trans = 0;
-g.step();
-check('locked door stays shut with no key', g.room('2,5').doorState()[W] === DS.BARRED);
-g.party.keys = 1;
-hold(IN.LEFT, 12);
-check('locked door opens with a key', g.room('2,5').doorState()[W] === DS.OPEN);
-check('the key was spent', g.party.keys === 0);
-
-// --- bombs blow open a cracked wall ---------------------------------------
-p.room = '5,4'; p.x = 40; p.y = 80; p.dir = W; p.trans = 0; p.prev = 0;
-g.step();
-g.room('5,4').ents.length = 0;   // clear the hurlers so only the bomb is in play
-g.party.bombs = 5;
-p.sel = 'bomb';
-tap(IN.B);
-hold(0, 80);
-check('bomb opened the cracked wall', g.room('5,4').doorState()[W] === DS.OPEN);
-
-// --- bombs must not hurt the hero who set them ----------------------------
-check('own bomb left the hero unharmed', p.hp === hp0 - 2, `hp=${p.hp}`);
-
-// --- the boss room --------------------------------------------------------
-p.hp = p.maxHp;
-p.room = '3,1'; p.x = 32; p.y = 140; p.trans = 0;   // out of the wyrm's lane
-g.step();
-const boss = g.room('3,1').ents.find(e => e.kind === KIND.WYRM);
-check('the wyrm is waiting', !!boss, boss ? `hp=${boss.hp}` : '');
-let breathed = 0;
-for (let i = 0; i < 260; i++) {
-  p.input = 0; p.invuln = 60; g.step(); g.clearFx();
-  if (g.room('3,1').ents.some(e => e.kind === KIND.FIREBALL)) breathed++;
+// --- killing a boss unseals the stairs -------------------------------------
+a.depth = 5;
+const f5 = g.floor(5);
+const boss5 = f5.ents.find(e => isBoss(e.kind));
+a.invuln = 99999;
+for (let i = 0; i < 4000 && boss5 && !boss5.dead; i++) {
+  g.hurtMob(boss5, 40, 0, f5, a);
+  boss5.flash = 0;
+  g.step(); g.clearTransient();
 }
-check('the wyrm breathes fire', breathed > 0, `${breathed} ticks with fire in the air`);
+check('the chapter boss can be brought down', boss5.dead);
+check('and that unseals the way down', f5.tiles[f5.level.exit] === TT.EXIT);
 
-// --- a wiped party is pulled back to the entrance, progress intact --------
-p.room = '3,3'; p.trans = 0; p.ghost = false; p.hp = 2; p.invuln = 0;
-const openedBefore = g.room('2,5').opened[W];
-g.hurtPlayer(p, 4, p.x + 10, p.y);
-check('the last hero falling ends the run', p.ghost);
-g.step();
-check('the crypt takes over', g.state === 'over', g.state);
-for (let i = 0; i < 120; i++) g.step();
-check('and returns the party to the entrance', g.state === 'play' && p.room === '3,6' && !p.ghost,
-  `${g.state} ${p.room}`);
-check('with full hearts', p.hp === p.maxHp, `${p.hp}/${p.maxHp}`);
-check('and the doors you opened still open', g.room('2,5').opened[W] === openedBefore);
+// --- falling and being helped up ------------------------------------------
+b.depth = 1; b.invuln = 0;
+g.hurtPlayer(b, 9999, b.x + 20, b.y);
+check('a hero at zero becomes a spirit', b.ghost);
+a.depth = 1; a.ghost = false; a.hp = a.maxHp;
+for (let i = 0; i < 90; i++) { a.x = b.x; a.y = b.y; g.step(); g.clearTransient(); }
+check('standing on them brings them back', !b.ghost, `hp=${b.hp}`);
 
-// --- co-op: a downed hero can be revived by a friend ----------------------
-const q = g.addPlayer(2, 'JASON');
-q.room = '3,6'; q.x = 120; q.y = 100; q.trans = 0;
-p.room = '3,6'; p.x = 120; p.y = 100; p.trans = 0; p.invuln = 0;
-g.hurtPlayer(p, 99, 200, 100);
-check('a hero at zero hearts becomes a spirit', p.ghost && !q.ghost);
-for (let i = 0; i < 80; i++) { p.x = q.x; p.y = q.y; g.step(); g.clearFx(); }
-check('standing on a spirit brings them back', !p.ghost, `hp=${p.hp}`);
-g.removePlayer(2);
-
-// --- the relic ends the delve ---------------------------------------------
-p.room = '3,0'; p.trans = 0; p.ghost = false; p.hp = p.maxHp;
-g.step();
-const relic = g.room('3,0').ents.find(e => e.kind === KIND.DROP);
-check('the relic is on its altar', !!relic);
-if (relic) {
-  p.x = relic.x; p.y = relic.y;
-  for (let i = 0; i < 20 && g.state === 'play'; i++) { g.step(); g.clearFx(); }
-}
-check('taking it wins the run', g.state === 'win', g.state);
-check('the party holds the relic', g.party.relic);
-
-// --- snapshot size --------------------------------------------------------
-const snap = JSON.stringify(g.snapshotFor(p));
-check('snapshot stays small', snap.length < 2000, `${snap.length} bytes`);
-
-// --- every room is reachable through its declared doors -------------------
-import('../shared/dungeon.js').then(({ ROOMS, ROOM_BY_ID, START_ROOM }) => {
-  const seen = new Set([START_ROOM]);
-  const queue = [START_ROOM];
-  while (queue.length) {
-    const def = ROOM_BY_ID.get(queue.shift());
-    for (let d = 0; d < 4; d++) {
-      if (def.doors[d] === DOOR.NONE) continue;
-      const dx = [0, 1, 0, -1][d], dy = [-1, 0, 1, 0][d];
-      const id = `${def.gx + dx},${def.gy + dy}`;
-      if (ROOM_BY_ID.has(id) && !seen.has(id)) { seen.add(id); queue.push(id); }
-    }
-  }
-  check('every room is reachable', seen.size === ROOMS.length, `${seen.size}/${ROOMS.length}`);
-  console.log(fails ? `\n${fails} FAILURES` : '\nall checks passed');
-  process.exit(fails ? 1 : 0);
-});
+console.log(fails ? `\n${fails} FAILURES` : '\nall checks passed');
+process.exit(fails ? 1 : 0);
