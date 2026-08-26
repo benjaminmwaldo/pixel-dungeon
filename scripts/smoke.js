@@ -79,12 +79,61 @@ check('gold is picked up by walking over it', a.gold >= gold0 + 25, `${gold0} ->
 
 g.dropItem(f1, tileUnder(a, PLAYER_BOX), { type: ITEM.POTION, kind: 'healing' });
 idle(12);
-check('a potion goes to the quick bar', a.inv.some(s => s.item.type === ITEM.POTION));
+check('a potion goes in the pack', a.bag.some(s => s && s.item.type === ITEM.POTION));
 a.hp = 1;
-const potSlot = a.inv.findIndex(s => s.item.type === ITEM.POTION);
+const potSlot = a.bag.findIndex(s => s && s.item.type === ITEM.POTION);
 g.useSlot(a, potSlot);
 check('drinking it heals', a.hp > 1, `hp=${a.hp}`);
 check('and identifies the potion for the party', g.known.potions.includes('healing'));
+
+// --- the pack --------------------------------------------------------------
+{
+  const before = a.equip.weapon.tier;
+  g.take(a, f1, { type: ITEM.WEAPON, tier: 4, upgrade: 1 });
+  const wSlot = a.bag.findIndex(s => s && s.item.type === ITEM.WEAPON);
+  check('better gear waits in the pack rather than auto-equipping',
+    wSlot >= 0 && a.equip.weapon.tier === before);
+  g.invOp(a, 'equip', wSlot);
+  check('equipping it swaps the old one back into the pack',
+    a.equip.weapon.tier === 4 && a.bag[wSlot]?.item.tier === before,
+    `now tier ${a.equip.weapon.tier}`);
+
+  const src = a.bag.findIndex(s => s && s.item.type === ITEM.FOOD);
+  const dst = a.bag.findIndex((s, i) => s === null && i > src);
+  if (src >= 0 && dst >= 0) {
+    g.invOp(a, 'swap', src, dst);
+    check('items can be moved between slots', a.bag[dst]?.item.type === ITEM.FOOD);
+  }
+
+  const dropSlot = a.bag.findIndex(s => s && s.item.type === ITEM.FOOD);
+  const floorBefore = f1.ents.filter(e => e.kind === KIND.ITEM).length;
+  g.invOp(a, 'drop', dropSlot);
+  check('dropping puts it back on the floor for a friend',
+    f1.ents.filter(e => e.kind === KIND.ITEM).length === floorBefore + 1);
+}
+
+// --- perks -----------------------------------------------------------------
+{
+  const hpBefore = a.maxHp;
+  a.perkPoints = 4;
+  g.spendPerk(a, 'thickSkin');
+  check('a perk with an unmet prerequisite is refused', !a.perks.thickSkin);
+  g.spendPerk(a, 'tough');
+  check('a root perk can be learned', a.perks.tough === 1);
+  check('and it changes the hero', a.maxHp === hpBefore + 5, `${hpBefore} -> ${a.maxHp}`);
+  g.spendPerk(a, 'thickSkin');
+  check('the prerequisite now opens the branch', a.perks.thickSkin === 1);
+  check('armour went up', a.stats.armour === 2);
+  check('points were spent', a.perkPoints === 2, `${a.perkPoints} left`);
+
+  g.spendPerk(a, 'arcanePower');
+  check('you cannot spend in another class tree', !a.perks.arcanePower);
+
+  const lvl = a.level, pts = a.perkPoints;
+  g.gainXp(a, 9999);
+  check('levelling up hands out perk points', a.level > lvl && a.perkPoints > pts,
+    `level ${lvl}->${a.level}, points ${pts}->${a.perkPoints}`);
+}
 
 // --- fog of war hides what you cannot see ---------------------------------
 const snap = g.snapshotFor(a);
@@ -151,6 +200,22 @@ check('a hero at zero becomes a spirit', b.ghost);
 a.depth = 1; a.ghost = false; a.hp = a.maxHp;
 for (let i = 0; i < 90; i++) { a.x = b.x; a.y = b.y; g.step(); g.clearTransient(); }
 check('standing on them brings them back', !b.ghost, `hp=${b.hp}`);
+
+// --- a party wipe must restart AND tell the clients ------------------------
+{
+  a.depth = 1; b.depth = 1;
+  a.invuln = 0; b.invuln = 0;
+  a.ghost = false; b.ghost = false;
+  g.hurtPlayer(a, 9999, a.x + 20, a.y);
+  g.hurtPlayer(b, 9999, b.x + 20, b.y);
+  g.step();
+  check('a wiped party ends the run', g.state === 'over', g.state);
+  g.announceStart = false;
+  for (let i = 0; i < 300 && g.state !== 'play'; i++) { g.step(); g.clearTransient(); }
+  check('the dungeon starts over on its own', g.state === 'play');
+  check('and the clients are told to begin again', g.announceStart === true);
+  check('heroes come back on their feet', !a.ghost && a.depth === 1 && a.hp > 0);
+}
 
 console.log(fails ? `\n${fails} FAILURES` : '\nall checks passed');
 process.exit(fails ? 1 : 0);

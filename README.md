@@ -41,10 +41,15 @@ Use a different port with `node server/index.js --port 9000`.
 | Z | attack |
 | X | class ability (bolt, arrow, brace, cloak) |
 | E or Space | use the stairs, a well, a pedestal |
-| 1-8 | drink, read, eat or drop what is in that quick slot |
-| C | change class in the lobby |
+| 1-8 | use the item in that quick slot |
+| I | open your pack |
+| K | open your skill trees |
+| C | pick up and move an item; change class in the lobby |
 | Enter | confirm, ready up |
 | M | mute |
+
+Neither the pack nor the skill trees pause anything — three other people are
+still playing. You stand still while they are open, and the floor notices.
 
 A gamepad works if one is plugged in, and touch controls appear on phones.
 
@@ -70,6 +75,26 @@ fog is enforced by the server, not painted over the top.
 reach. The mage throws arcane bolts and dies if you look at them. The rogue is
 quick, slips into shadow, and reads traps through the floor. The ranger's arrows
 carry, and they see a tile further than anyone.
+
+**Skill trees.** Every level hands you a perk point. Three trees are open to
+everyone — VITALITY for staying alive, PROWESS for hitting things, FORTUNE for
+finding them — and a fourth belongs to your class alone. Nodes unlock the nodes
+below them, most have two or three ranks, and everything folds into one stat
+block the simulation reads, so a perk changes how the game plays rather than
+just a number on a screen: LOCKPICK opens locked doors without a key, PIERCING
+BOLT sends the mage's bolts through what they kill, HUNTER'S EYE lets the ranger
+feel monsters through walls, and PACK RAT simply gives you more room.
+
+![The warrior's tree](docs/skills-warrior.png)
+
+**A pack you can actually rummage in.** Sixteen slots (more with PACK RAT or
+DEEP POCKETS), the first eight reachable with the number keys. Gear you find
+waits in the pack instead of auto-equipping, so you choose what to wear and
+what to leave; equipping swaps the old piece back into your bag. You can move
+things between slots, and drop anything on the floor — which is how you hand a
+potion to the mage who needs it.
+
+![The pack](docs/inventory.png)
 
 **Loot is unidentified.** Every run shuffles which colour of glass and which
 rune goes with which effect, so the first crimson potion is a gamble — and once

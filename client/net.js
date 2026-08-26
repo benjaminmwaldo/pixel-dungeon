@@ -4,7 +4,7 @@
 
 import { CLASS_ORDER, PLAYER_BOX, CLASSES } from '../shared/constants.js';
 import { LEVEL_LEN, LEVEL_W } from '../shared/terrain.js';
-import { newPlayerState, playerStep } from '../shared/player.js';
+import { newPlayerState, playerStep, NO_MODS } from '../shared/player.js';
 import { tileUnder } from '../shared/physics.js';
 import { viewFrom } from '../shared/fov.js';
 
@@ -36,7 +36,11 @@ export class Net {
     this.fov = new Uint8Array(LEVEL_LEN);
     this.level = { tiles: this.tiles, rooms: [] };
     this.fovTile = -1;
-    this.inv = [];
+    this.bag = [];
+    this.equip = { weapon: { tier: 1, upgrade: 0 }, armor: { tier: 1, upgrade: 0 } };
+    this.perks = {};
+    this.perkPoints = 0;
+    this.mods = NO_MODS;
     this.party = [];
     this.roster = new Map();
     this.known = { potions: [], scrolls: [] };
@@ -75,6 +79,8 @@ export class Net {
   ready(v) { this.send({ t: 'ready', v }); }
   act() { this.send({ t: 'act' }); }
   useSlot(n) { this.send({ t: 'use', n }); }
+  invOp(op, a, b = 0) { this.send({ t: 'inv', op, a, b }); }
+  takePerk(id) { this.send({ t: 'perk', id }); }
   again() { this.send({ t: 'again' }); }
 
   handle(m) {
@@ -131,7 +137,16 @@ export class Net {
     this.serverState = m.state;
     this.roster = new Map(m.players.map(p => [p.id, p]));
     const mine = this.roster.get(this.id);
-    if (mine) { this.inv = mine.inv; this.cls = mine.cls; }
+    if (mine) {
+      this.bag = mine.bag || [];
+      this.equip = mine.equip || this.equip;
+      this.perks = mine.perks || {};
+      this.perkPoints = mine.perkPoints || 0;
+      this.mods = mine.mods || NO_MODS;
+      this.cls = mine.cls;
+      this.perkSight = (this.perks.keenEye || 0);
+      this.fovTile = -1;   // sight may have changed
+    }
   }
 
   onSnapshot(m) {
@@ -153,12 +168,13 @@ export class Net {
     s.stun = me[15];
     this.gold = me[16]; this.hunger = me[17]; this.invis = me[18];
     this.reviveT = me[19]; this.revivedBy = me[20];
+    this.livePoints = me[21] ?? this.perkPoints;
 
     const ack = m.a;
     this.history = this.history.filter(h => h.seq > ack);
     for (const h of this.history) {
       s.prev = h.prev;
-      playerStep(s, h.bits, this.tiles, this.cls);
+      playerStep(s, h.bits, this.tiles, this.cls, this.mods);
     }
 
     this.err.x = clampErr(this.err.x + (prevX - s.x));
@@ -190,7 +206,8 @@ export class Net {
     const here = tileUnder(this.local, PLAYER_BOX);
     if (!force && here === this.fovTile) return;
     this.fovTile = here;
-    viewFrom(this.level, here, CLASSES[this.cls]?.sight || 8, this.fov);
+    const bonus = this.perkSight || 0;
+    viewFrom(this.level, here, (CLASSES[this.cls]?.sight || 8) + bonus, this.fov);
     for (let i = 0; i < LEVEL_LEN; i++) if (this.fov[i]) this.explored[i] = 1;
   }
 
@@ -200,7 +217,7 @@ export class Net {
     this.history.push({ seq: this.seq, bits, prev: this.local.prev });
     if (this.history.length > 90) this.history.shift();
     this.send({ t: 'in', s: this.seq, b: bits });
-    playerStep(this.local, bits, this.tiles, this.cls);
+    playerStep(this.local, bits, this.tiles, this.cls, this.mods);
     this.refreshFov();
   }
 
@@ -256,7 +273,10 @@ export class Net {
       },
       ents, items, others,
       party: this.party,
-      inv: this.inv,
+      bag: this.bag,
+      equip: this.equip,
+      perks: this.perks,
+      perkPoints: this.livePoints ?? this.perkPoints,
       app: this.app,
       known: this.known,
       particles: [],

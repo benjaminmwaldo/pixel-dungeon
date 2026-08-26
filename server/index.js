@@ -207,11 +207,14 @@ function handle(conn, client, msg) {
     }
     case 'act': if (game && p) game.interact(p); break;
     case 'use': if (game && p) game.useSlot(p, msg.n | 0); break;
+    case 'inv':
+      if (game && p) game.invOp(p, String(msg.op || ''), msg.a | 0, msg.b | 0);
+      break;
+    case 'perk':
+      if (game && p) game.spendPerk(p, String(msg.id || ''));
+      break;
     case 'again':
-      if (game && (game.state === 'win' || game.state === 'over')) {
-        game.restart();
-        broadcast(game, { t: 'start' });
-      }
+      if (game && (game.state === 'win' || game.state === 'over')) game.restart();
       break;
     case 'ping': conn.sendJson({ t: 'pong', c: msg.c }); break;
   }
@@ -254,6 +257,11 @@ setInterval(() => {
 
   for (const game of games.values()) {
     if (game.state === 'lobby') continue;
+
+    if (game.announceStart) {
+      game.announceStart = false;
+      broadcast(game, { t: 'start' });
+    }
 
     for (const p of game.players.values()) {
       const conn = connFor(game, p.id);

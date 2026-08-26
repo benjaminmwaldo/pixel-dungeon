@@ -5,6 +5,9 @@
 import { IN, N, E, S, W, PLAYER_BOX, ATTACK_TICKS, CLASSES } from './constants.js';
 import { moveActor, MODE, tileUnder, terrainFactor } from './physics.js';
 
+/** Perk multipliers. The client is told these so its prediction matches. */
+export const NO_MODS = { speedMult: 1, swingMult: 1, reachMult: 1, cdMult: 1 };
+
 export function newPlayerState() {
   return {
     x: 0, y: 0, dir: S,
@@ -23,7 +26,7 @@ export function newPlayerState() {
  * Advance one tick. `bits` is this frame's input.
  * Returns what the caller may need to act on.
  */
-export function playerStep(p, bits, tiles, cls) {
+export function playerStep(p, bits, tiles, cls, mods = NO_MODS) {
   const ev = { attacked: false, ability: false, moved: false, blockedBy: -1 };
   const pressed = bits & ~p.prev;
   p.prev = bits;
@@ -44,11 +47,15 @@ export function playerStep(p, bits, tiles, cls) {
   const def = CLASSES[cls] || CLASSES.warrior;
 
   if (!p.ghost) {
-    if (pressed & IN.A) { p.atk = ATTACK_TICKS; ev.attacked = true; return ev; }
+    if (pressed & IN.A) {
+      p.atk = Math.max(3, Math.round(ATTACK_TICKS * mods.swingMult));
+      ev.attacked = true;
+      return ev;
+    }
     if (bits & IN.B) {
       if (def.ranged) {
         if (p.abilityCd <= 0) {
-          p.abilityCd = def.ranged.cd;
+          p.abilityCd = Math.max(4, Math.round(def.ranged.cd * mods.cdMult));
           p.atk = 5;
           ev.ability = true;
           return ev;
@@ -57,7 +64,7 @@ export function playerStep(p, bits, tiles, cls) {
         // hold to brace: slower, but blows glance off
         p.guarding = true;
       } else if (cls === 'rogue' && (pressed & IN.B) && p.abilityCd <= 0) {
-        p.abilityCd = 240;
+        p.abilityCd = Math.max(40, Math.round(240 * mods.cdMult));
         ev.ability = true;
       }
     }
@@ -77,7 +84,7 @@ export function playerStep(p, bits, tiles, cls) {
   if (dx !== 0 || dy !== 0) {
     p.dir = dx < 0 ? W : dx > 0 ? E : dy < 0 ? N : S;
     const under = tiles[tileUnder(p, PLAYER_BOX)];
-    let speed = (p.ghost ? 2.6 : def.speed) * terrainFactor(under);
+    let speed = (p.ghost ? 2.6 : def.speed * mods.speedMult) * terrainFactor(under);
     if (p.guarding) speed *= 0.45;
     const r = moveActor(p, dx * speed, dy * speed, tiles,
       PLAYER_BOX, p.ghost ? MODE.FLY : MODE.WALK, true);
@@ -93,7 +100,6 @@ export function playerStep(p, bits, tiles, cls) {
 /** The swing's hitbox for this frame, or null. */
 export function meleeBox(p, reach = 18) {
   if (p.atk <= 0 || p.ghost) return null;
-  if (p.atk < ATTACK_TICKS - 6) return null;
   const cx = p.x + 8, cy = p.y + 8;
   const half = 7;
   switch (p.dir) {

@@ -6,6 +6,8 @@ import { Net } from './net.js';
 import * as audio from './audio.js';
 import { TICK_MS, CLASS_ORDER, isBoss } from '../shared/constants.js';
 import { TT, regionOf } from '../shared/terrain.js';
+import { drawInventory, drawPerks, moveNode, firstNode } from './screens.js';
+import { treesFor } from '../shared/perks.js';
 
 const canvas = document.getElementById('screen');
 const renderer = new Renderer(canvas);
@@ -14,6 +16,9 @@ const input = new Input();
 let mode = 'connecting';   // connecting | title | lobby | play | end | lost
 let banner = null, bannerUntil = 0;
 let endStats = null, endWon = false;
+let panel = null;                       // null | 'inv' | 'perks'
+const invUi = { cursor: 0, held: null };
+const perkUi = { tree: 0, node: null };
 let autoReady = false;
 let myReady = false;
 const particles = [];
@@ -146,9 +151,101 @@ function lobbyKeys(ev) {
 }
 
 function playKeys(ev) {
-  if (ev.type === 'act') { net.act(); audio.sfx('menu'); }
-  if (ev.type === 'slot') net.useSlot(ev.n);
-  if (ev.type === 'start') net.act();
+  if (panel) return panelKeys(ev);
+  switch (ev.type) {
+    case 'act': net.act(); audio.sfx('menu'); break;
+    case 'slot': net.useSlot(ev.n); break;
+    case 'start': net.act(); break;
+    case 'pack': openPanel('inv'); break;
+    case 'skills': openPanel('perks'); break;
+    default: break;
+  }
+}
+
+function openPanel(which) {
+  panel = which;
+  audio.sfx('select');
+  if (which === 'inv') { invUi.cursor = 0; invUi.held = null; }
+  else if (!perkUi.node) firstNode(net.state(performance.now()), perkUi);
+}
+
+function panelKeys(ev) {
+  if (ev.type === 'cancel'
+      || (ev.type === 'pack' && panel === 'inv')
+      || (ev.type === 'skills' && panel === 'perks')) {
+    panel = null; invUi.held = null; audio.sfx('menu');
+    return;
+  }
+  if (ev.type === 'pack') { openPanel('inv'); return; }
+  if (ev.type === 'skills') { openPanel('perks'); return; }
+  if (panel === 'inv') return invKeys(ev);
+  return perkKeys(ev);
+}
+
+function invKeys(ev) {
+  const bag = net.bag || [];
+  const rows = Math.max(1, Math.ceil(bag.length / 8));
+  const move = (dx, dy) => {
+    if (invUi.cursor < 0) {
+      if (dy > 0) invUi.cursor = invUi.cursor === -1 ? -2 : 0;
+      else if (dy < 0) invUi.cursor = invUi.cursor === -2 ? -1 : (rows - 1) * 8;
+      else if (dx < 0) invUi.cursor = 7;
+      return;
+    }
+    let c = invUi.cursor % 8, r = (invUi.cursor / 8) | 0;
+    c += dx; r += dy;
+    if (c > 7) { invUi.cursor = -1; return; }
+    if (r < 0) { invUi.cursor = -1; return; }
+    if (c < 0) c = 0;
+    if (r >= rows) r = rows - 1;
+    invUi.cursor = Math.min(bag.length - 1, r * 8 + c);
+  };
+
+  switch (ev.type) {
+    case 'left': move(-1, 0); audio.sfx('menu'); break;
+    case 'right': move(1, 0); audio.sfx('menu'); break;
+    case 'up': move(0, -1); audio.sfx('menu'); break;
+    case 'down': move(0, 1); audio.sfx('menu'); break;
+    case 'start': case 'a':
+      if (invUi.cursor < 0) net.invOp('unequip', invUi.cursor === -1 ? 0 : 1);
+      else net.invOp('use', invUi.cursor);
+      audio.sfx('select');
+      break;
+    case 'b':
+      if (invUi.cursor >= 0) { net.invOp('drop', invUi.cursor); audio.sfx('pickup'); }
+      break;
+    case 'cycle':
+      if (invUi.cursor < 0) break;
+      if (invUi.held === null) { invUi.held = invUi.cursor; audio.sfx('menu'); }
+      else { net.invOp('swap', invUi.held, invUi.cursor); invUi.held = null; audio.sfx('select'); }
+      break;
+    case 'slot':
+      if (invUi.held !== null) { net.invOp('swap', invUi.held, ev.n); invUi.held = null; }
+      else net.useSlot(ev.n);
+      audio.sfx('select');
+      break;
+    default: break;
+  }
+}
+
+function perkKeys(ev) {
+  const st = net.state(performance.now());
+  const trees = treesFor(st.me.cls);
+  switch (ev.type) {
+    case 'left': moveNode(st, perkUi, -1, 0); audio.sfx('menu'); break;
+    case 'right': moveNode(st, perkUi, 1, 0); audio.sfx('menu'); break;
+    case 'up': moveNode(st, perkUi, 0, -1); audio.sfx('menu'); break;
+    case 'down': moveNode(st, perkUi, 0, 1); audio.sfx('menu'); break;
+    case 'tab': case 'cycle':
+      perkUi.tree = (perkUi.tree + 1) % trees.length;
+      firstNode(st, perkUi);
+      audio.sfx('menu');
+      break;
+    case 'start': case 'a':
+      if (perkUi.node) { net.takePerk(perkUi.node); audio.sfx('select'); }
+      break;
+    default: break;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -161,7 +258,7 @@ function frame(now) {
   last = now;
   while (acc >= TICK_MS) {
     acc -= TICK_MS;
-    if (mode === 'play') net.tick(input.bits());
+    if (mode === 'play') net.tick(panel ? 0 : input.bits());
   }
   draw(now);
 }
@@ -186,7 +283,9 @@ function draw(now) {
       renderer.drawWorld(st);
       renderer.drawHUD(st);
       renderer.bossBanner();
-      if (banner) renderer.banner(banner);
+      if (panel === 'inv') drawInventory(renderer, st, invUi);
+      else if (panel === 'perks') drawPerks(renderer, st, perkUi);
+      else if (banner) renderer.banner(banner);
       else promptForTile();
       updateMusic(st);
       break;
@@ -221,4 +320,7 @@ window.PD = {
   frame: () => draw(performance.now()),
   hold: (bits, n = 1) => { for (let i = 0; i < n; i++) if (mode === 'play') net.tick(bits); },
   key: (code) => window.dispatchEvent(new KeyboardEvent('keydown', { code, bubbles: true })),
+  get panel() { return panel; },
+  set panel(v) { panel = v; },
+  invUi, perkUi,
 };

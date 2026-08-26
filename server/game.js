@@ -23,8 +23,11 @@ import {
   ITEM, POTION, SCROLL, makeAppearances, rollLoot, rollPrize, rollDrop,
   WEAPONS, ARMORS, isConsumable, stackKey,
 } from '../shared/items.js';
+import { computeStats, canTake, clientMods, PERKS } from '../shared/perks.js';
 
 const QUICK_SLOTS = 8;
+const BAG_BASE = 16;
+const BAG_MAX = 24;
 
 // ---------------------------------------------------------------------------
 class Floor {
@@ -93,14 +96,19 @@ export class Game {
       id, name: (name || 'HERO').slice(0, 8).toUpperCase(),
       cls, colour: def.colour,
       depth: 1, hp: def.hp, maxHp: def.hp, level: 1, xp: 0,
-      weapon: { tier: 1, upgrade: 0 },
-      armor: { tier: 1, upgrade: 0 },
-      inv: [], gold: 0, hunger: HUNGER_MAX, hungerTick: 0,
+      bag: new Array(BAG_BASE).fill(null),
+      equip: { weapon: { type: ITEM.WEAPON, tier: 1, upgrade: 0 },
+               armor: { type: ITEM.ARMOR, tier: 1, upgrade: 0 } },
+      perks: {}, perkPoints: 0, stats: computeStats({}),
+      gold: 0, hunger: HUNGER_MAX, hungerTick: 0, regenTick: 0,
       invuln: 0, reviveT: 0, revivedBy: 0,
       input: 0, seq: 0, queue: [], ready: false,
       fov: new Uint8Array(LEVEL_LEN), fovTile: -1,
       invis: 0, haste: 0, might: 0, kills: 0, needFloor: true,
     });
+    p.bag[0] = { key: ITEM.FOOD, item: { type: ITEM.FOOD }, count: 2 };
+    this.recalc(p);
+    p.hp = p.maxHp;
     this.players.set(id, p);
     this.metaDirty = true;
     this.lastActivity = Date.now();
@@ -108,6 +116,29 @@ export class Game {
   }
 
   removePlayer(id) { this.players.delete(id); this.metaDirty = true; }
+
+  /** Recompute everything the perks touch, and resize the bag to match. */
+  recalc(p) {
+    p.stats = computeStats(p.perks);
+    const base = CLASSES[p.cls].hp + (p.level - 1) * HP_PER_LEVEL;
+    p.maxHp = base + p.stats.maxHp;
+    if (p.hp > p.maxHp) p.hp = p.maxHp;
+    const want = Math.min(BAG_MAX, BAG_BASE + p.stats.bagBonus);
+    while (p.bag.length < want) p.bag.push(null);
+    while (p.bag.length > want && p.bag[p.bag.length - 1] === null) p.bag.pop();
+    p.mods = clientMods(p.stats);
+    this.metaDirty = true;
+  }
+
+  spendPerk(p, id) {
+    const verdict = canTake(id, p.perks, p.cls, p.perkPoints);
+    if (!verdict.ok) return;
+    p.perks[id] = (p.perks[id] || 0) + 1;
+    p.perkPoints--;
+    this.recalc(p);
+    this.fx(this.floor(p.depth), 'levelup', p.x + 8, p.y + 8);
+    this.banner(`${p.name} LEARNED ${PERKS[id].name}`, 1600);
+  }
 
   playersOn(depth) {
     const out = [];
@@ -178,11 +209,11 @@ export class Game {
         p.x = spot.x; p.y = spot.y;
         this.revive(p, f);
       }
-      playerStep(p, p.input, f.tiles, p.cls);
+      playerStep(p, p.input, f.tiles, p.cls, p.mods);
       return;
     }
 
-    const ev = playerStep(p, p.input, f.tiles, p.cls);
+    const ev = playerStep(p, p.input, f.tiles, p.cls, p.mods);
 
     // walking into a shut door opens it; a locked one wants this floor's key
     if (ev.blockedBy >= 0) {
@@ -191,12 +222,14 @@ export class Game {
         f.set(ev.blockedBy, TT.OPEN_DOOR);
         this.fx(f, 'door', tx(ev.blockedBy) * TILE + 8, ty(ev.blockedBy) * TILE + 8);
       } else if (t === TT.LOCKED_DOOR) {
-        const slot = p.inv.findIndex(s => s.item.type === ITEM.KEY);
-        if (slot >= 0) {
-          if (--p.inv[slot].count <= 0) p.inv.splice(slot, 1);
+        const slot = p.bag.findIndex(s => s && s.item.type === ITEM.KEY);
+        if (p.stats.lockpick || slot >= 0) {
+          if (!p.stats.lockpick && slot >= 0) {
+            if (--p.bag[slot].count <= 0) p.bag[slot] = null;
+          }
           f.set(ev.blockedBy, TT.OPEN_DOOR);
           this.fx(f, 'unlock', tx(ev.blockedBy) * TILE + 8, ty(ev.blockedBy) * TILE + 8);
-          this.banner('THE LOCK FALLS AWAY', 1400);
+          this.banner(p.stats.lockpick ? 'THE LOCK YIELDS TO YOUR PICKS' : 'THE LOCK FALLS AWAY', 1400);
           this.metaDirty = true;
         }
       }
@@ -207,6 +240,11 @@ export class Game {
       this.resolveMelee(p, f);
     }
     if (ev.ability) this.useAbility(p, f);
+
+    if (p.stats.regen && p.hp < p.maxHp && ++p.regenTick >= p.stats.regen) {
+      p.regenTick = 0;
+      this.healPlayer(p, 1);
+    }
 
     this.underfoot(p, f);
     this.pickups(p, f);
@@ -223,19 +261,35 @@ export class Game {
     this.metaDirty = true;
   }
 
-  hurtPlayer(p, dmg, sx, sy) {
+  hurtPlayer(p, dmg, sx, sy, from) {
     if (p.ghost || p.invuln > 0 || this.state !== 'play') return;
-    const armour = ARMORS[p.armor.tier - 1].def + p.armor.upgrade * 1.5;
+    const st = p.stats;
+    const gear = p.equip.armor;
+    const armour = ARMORS[gear.tier - 1].def + gear.upgrade * 1.5 + st.armour;
     let taken = Math.max(1, Math.round(dmg - armour * 0.5));
-    if (p.guarding) taken = Math.max(0, Math.round(taken * 0.35));
-    p.hp -= taken;
-    p.invuln = INVULN_TICKS;
+    if (p.guarding) {
+      taken = Math.max(0, Math.round(taken * st.guard));
+      if (st.reflect && from && !from.dead) {
+        this.hurtMob(from, Math.round(dmg * st.reflect), p.dir, this.floor(p.depth), p);
+      }
+    }
+    if (st.manaShield < 1 && p.abilityCd <= 0) taken = Math.round(taken * st.manaShield);
+    if (st.lastStand < 1 && p.hp < p.maxHp * 0.25) taken = Math.round(taken * st.lastStand);
+    // a warlord standing with you takes the edge off
+    for (const o of this.livingOn(p.depth)) {
+      if (o.id === p.id || o.stats.aura >= 1) continue;
+      if (dist2(o.x, o.y, p.x, p.y) < 64 * 64) { taken = Math.round(taken * o.stats.aura); break; }
+    }
+    p.hp -= Math.max(0, taken);
+    p.invuln = Math.round(INVULN_TICKS * st.invulnMult);
     const f = this.floor(p.depth);
-    const dx = (p.x + 8) - sx, dy = (p.y + 8) - sy;
-    const len = Math.hypot(dx, dy) || 1;
-    p.knockX = Math.round((dx / len) * KNOCKBACK_SPEED);
-    p.knockY = Math.round((dy / len) * KNOCKBACK_SPEED);
-    p.knockT = KNOCKBACK_TICKS;
+    if (!p.stats.steady) {
+      const dx = (p.x + 8) - sx, dy = (p.y + 8) - sy;
+      const len = Math.hypot(dx, dy) || 1;
+      p.knockX = Math.round((dx / len) * KNOCKBACK_SPEED);
+      p.knockY = Math.round((dy / len) * KNOCKBACK_SPEED);
+      p.knockT = KNOCKBACK_TICKS;
+    }
     p.atk = 0;
     if (p.hp <= 0) {
       p.hp = 0;
@@ -258,14 +312,15 @@ export class Game {
   }
 
   gainXp(p, amount) {
-    p.xp += amount;
+    p.xp += Math.max(1, Math.round(amount * p.stats.xpMult));
     while (p.xp >= XP_PER_LEVEL(p.level)) {
       p.xp -= XP_PER_LEVEL(p.level);
       p.level++;
-      p.maxHp += HP_PER_LEVEL;
+      p.perkPoints++;
+      this.recalc(p);
       p.hp = p.maxHp;
       this.fx(this.floor(p.depth), 'levelup', p.x + 8, p.y + 8);
-      this.banner(`${p.name} REACHED LEVEL ${p.level}`, 1600);
+      this.banner(`${p.name} REACHED LEVEL ${p.level} - A PERK POINT`, 1900);
     }
     this.metaDirty = true;
   }
@@ -273,16 +328,25 @@ export class Game {
   // --- melee ---------------------------------------------------------------
   resolveMelee(p, f) {
     const def = CLASSES[p.cls];
-    const box = meleeBox(p, def.reach);
+    const st = p.stats;
+    const box = meleeBox(p, Math.round(def.reach * st.reachMult));
     if (!box) return;
-    let dmg = def.melee + WEAPONS[p.weapon.tier - 1].dmg + p.weapon.upgrade * 2
-            + Math.floor(p.level * 0.6);
-    if (p.might > 0) dmg = Math.round(dmg * 1.5);
+    const w = p.equip.weapon;
+    const base = def.melee + WEAPONS[w.tier - 1].dmg + w.upgrade * 2
+               + Math.floor(p.level * 0.6) + st.melee;
     for (const e of f.ents) {
       if (e.dead || !isMob(e.kind)) continue;
       if (!rectsOverlap(box.x, box.y, box.w, box.h,
                         e.x + e.box.x, e.y + e.box.y, e.box.w, e.box.h)) continue;
-      this.hurtMob(e, dmg, p.dir, f, p);
+      let dmg = base;
+      if (p.might > 0) dmg *= 1.5;
+      if (st.berserk > 1 && p.hp < p.maxHp * 0.4) dmg *= st.berserk;
+      if (st.execute > 1 && e.hp < e.maxHp * 0.3) dmg *= st.execute;
+      if (st.backstab > 1 && !e.alerted) dmg *= st.backstab;
+      const sure = st.ambush && p.invis > 0;
+      if (sure || Math.random() < st.crit) { dmg *= 2; this.fx(f, 'clang', e.x + 8, e.y + 8); }
+      this.hurtMob(e, Math.round(dmg), p.dir, f, p);
+      if (st.daze) e.frozen = Math.max(e.frozen, st.daze);
     }
     // cut a path through the undergrowth
     const ahead = tileUnder({ x: p.x + DX[p.dir] * 10, y: p.y + DY[p.dir] * 10 }, PLAYER_BOX);
@@ -292,17 +356,27 @@ export class Game {
 
   useAbility(p, f) {
     const def = CLASSES[p.cls];
+    const st = p.stats;
     if (def.ranged) {
       this.fx(f, def.ranged.kind === KIND.ARROW ? 'arrow' : 'bolt', p.x + 8, p.y + 8);
-      f.ents.push({
-        id: this.entSeq++, kind: def.ranged.kind, x: p.x, y: p.y, dir: p.dir,
-        box: { x: 4, y: 4, w: 8, h: 8 }, t: 0,
-        speed: def.ranged.speed, range: def.ranged.range, travelled: 0,
-        dmg: def.ranged.dmg + Math.floor(p.level * 0.8) + p.weapon.upgrade * 2,
-        owner: p.id, friendly: true,
-      });
+      const dmg = def.ranged.dmg + Math.floor(p.level * 0.8)
+                + p.equip.weapon.upgrade * 2 + st.ranged;
+      const shots = Math.max(1, st.spread);
+      const base = Math.atan2(DY[p.dir], DX[p.dir]);
+      for (let i = 0; i < shots; i++) {
+        const spread = shots === 1 ? 0 : (i - (shots - 1) / 2) * 0.24;
+        const a = base + spread;
+        f.ents.push({
+          id: this.entSeq++, kind: def.ranged.kind, x: p.x, y: p.y, dir: p.dir,
+          box: { x: 4, y: 4, w: 8, h: 8 }, t: 0, aimed: true,
+          vx: Math.cos(a) * def.ranged.speed, vy: Math.sin(a) * def.ranged.speed,
+          speed: def.ranged.speed, range: def.ranged.range * st.rangeMult, travelled: 0,
+          dmg, owner: p.id, friendly: true,
+          pierce: st.pierce, snare: st.snare,
+        });
+      }
     } else if (p.cls === 'rogue') {
-      p.invis = 150;
+      p.invis = Math.round(150 * st.cloakMult);
       this.fx(f, 'cloak', p.x + 8, p.y + 8);
       this.banner(`${p.name} SLIPS INTO SHADOW`, 1200);
     }
@@ -319,11 +393,12 @@ export class Game {
       f.set(i, TT.TRAP_SPENT);
       this.springTrap(p, f, i);
     }
-    // a rogue reads the floor before standing on it
-    if (p.cls === 'rogue') {
+    // a rogue — or anyone trapwise — reads the floor before standing on it
+    const reach = Math.max(p.cls === 'rogue' ? 2 : 0, p.stats.search);
+    if (reach > 0) {
       const cx = tx(i), cy = ty(i);
-      for (let dy = -2; dy <= 2; dy++) {
-        for (let dx = -2; dx <= 2; dx++) {
+      for (let dy = -reach; dy <= reach; dy++) {
+        for (let dx = -reach; dx <= reach; dx++) {
           const nx = cx + dx, ny = cy + dy;
           if (!inBounds(nx, ny)) continue;
           const j = idx(nx, ny);
@@ -354,58 +429,113 @@ export class Game {
 
   /** True if the item left the floor. */
   take(p, f, item) {
-    switch (item.type) {
-      case ITEM.GOLD:
-        p.gold += item.amount;
-        this.fx(f, 'gold', p.x + 8, p.y + 8);
-        this.metaDirty = true;
-        return true;
-      case ITEM.RELIC:
-        this.state = 'win';
-        this.banner('THE AMULET IS YOURS', 4000);
-        return true;
-      case ITEM.WEAPON: {
-        if (item.tier * 3 + (item.upgrade || 0) <= p.weapon.tier * 3 + p.weapon.upgrade) return false;
-        p.weapon = { tier: item.tier, upgrade: item.upgrade || 0 };
-        this.fx(f, 'equip', p.x + 8, p.y + 8);
-        this.banner(`${p.name} TAKES UP THE ${WEAPONS[item.tier - 1].name}`, 1600);
-        this.metaDirty = true;
-        return true;
+    if (item.type === ITEM.GOLD) {
+      p.gold += Math.round(item.amount * p.stats.goldMult);
+      this.fx(f, 'gold', p.x + 8, p.y + 8);
+      this.metaDirty = true;
+      return true;
+    }
+    if (item.type === ITEM.RELIC) {
+      this.state = 'win';
+      this.banner('THE AMULET IS YOURS', 4000);
+      return true;
+    }
+    // a scholar knows a rune the moment they see it
+    if (item.type === ITEM.SCROLL && p.stats.scholar && !this.known.scrolls.includes(item.kind)) {
+      this.known.scrolls.push(item.kind);
+      this.banner(`YOU RECOGNISE THE SCROLL OF ${item.kind.toUpperCase()}`, 1800);
+    }
+    if (!this.addToBag(p, item)) {
+      this.banner(`${p.name}'S PACK IS FULL`, 1200);
+      return false;
+    }
+    this.fx(f, isConsumable(item) ? 'pickup' : 'equip', p.x + 8, p.y + 8);
+    this.metaDirty = true;
+    return true;
+  }
+
+  /** Stack it if it stacks, otherwise find a free slot. */
+  addToBag(p, item) {
+    const n = item.amount || 1;
+    if (isConsumable(item)) {
+      const key = stackKey(item);
+      const slot = p.bag.find(x => x && x.key === key);
+      if (slot) { slot.count += n; return true; }
+    }
+    const free = p.bag.indexOf(null);
+    if (free < 0) return false;
+    const copy = { ...item };
+    delete copy.amount;
+    p.bag[free] = { key: stackKey(item), item: copy, count: isConsumable(item) ? n : 1 };
+    return true;
+  }
+
+  /** Wear something from the bag, putting whatever you had back. */
+  equipFrom(p, n) {
+    const slot = p.bag[n];
+    if (!slot) return;
+    const it = slot.item;
+    if (it.type !== ITEM.WEAPON && it.type !== ITEM.ARMOR) return;
+    const which = it.type === ITEM.WEAPON ? 'weapon' : 'armor';
+    const old = p.equip[which];
+    p.equip[which] = { type: it.type, tier: it.tier, upgrade: it.upgrade || 0 };
+    p.bag[n] = old ? { key: stackKey(old), item: old, count: 1 } : null;
+    const table = it.type === ITEM.WEAPON ? WEAPONS : ARMORS;
+    this.fx(this.floor(p.depth), 'equip', p.x + 8, p.y + 8);
+    this.banner(`${p.name} EQUIPS THE ${table[it.tier - 1].name}`, 1500);
+    this.recalc(p);
+  }
+
+  /** Put one item back on the floor, where a friend can pick it up. */
+  dropSlot(p, n) {
+    const slot = p.bag[n];
+    if (!slot) return;
+    const f = this.floor(p.depth);
+    const item = { ...slot.item };
+    if (isConsumable(item) && slot.count > 1) { item.amount = 1; slot.count--; }
+    else { if (isConsumable(item)) item.amount = slot.count; p.bag[n] = null; }
+    this.dropItem(f, tileUnder(p, PLAYER_BOX), item);
+    this.fx(f, 'pickup', p.x + 8, p.y + 8);
+    this.metaDirty = true;
+  }
+
+  swapSlots(p, a, b) {
+    if (a === b) return;
+    if (a < 0 || b < 0 || a >= p.bag.length || b >= p.bag.length) return;
+    const t = p.bag[a]; p.bag[a] = p.bag[b]; p.bag[b] = t;
+    this.metaDirty = true;
+  }
+
+  /** One entry point for everything the inventory screen can do. */
+  invOp(p, op, a, b) {
+    if (this.state !== 'play' || p.ghost) return;
+    switch (op) {
+      case 'use': this.useSlot(p, a); break;
+      case 'equip': this.equipFrom(p, a); break;
+      case 'drop': this.dropSlot(p, a); break;
+      case 'swap': this.swapSlots(p, a, b); break;
+      case 'unequip': {
+        const which = a === 0 ? 'weapon' : 'armor';
+        const worn = p.equip[which];
+        if (!worn || worn.tier <= 1) return;      // your last shirt stays on
+        if (!this.addToBag(p, worn)) return;
+        p.equip[which] = { type: worn.type, tier: 1, upgrade: 0 };
+        this.recalc(p);
+        break;
       }
-      case ITEM.ARMOR: {
-        if (item.tier * 3 + (item.upgrade || 0) <= p.armor.tier * 3 + p.armor.upgrade) return false;
-        p.armor = { tier: item.tier, upgrade: item.upgrade || 0 };
-        this.fx(f, 'equip', p.x + 8, p.y + 8);
-        this.banner(`${p.name} DONS THE ${ARMORS[item.tier - 1].name}`, 1600);
-        this.metaDirty = true;
-        return true;
-      }
-      default: {
-        if (!isConsumable(item)) return false;
-        const key = stackKey(item);
-        const slot = p.inv.find(s => s.key === key);
-        const n = item.amount || 1;
-        if (slot) slot.count += n;
-        else {
-          if (p.inv.length >= QUICK_SLOTS) return false;
-          const copy = { ...item };
-          delete copy.amount;
-          p.inv.push({ key, item: copy, count: n });
-        }
-        this.fx(f, 'pickup', p.x + 8, p.y + 8);
-        this.metaDirty = true;
-        return true;
-      }
+      default: break;
     }
   }
 
   useSlot(p, n) {
     if (p.ghost || this.state !== 'play') return;
     const f = this.floor(p.depth);
-    const slot = p.inv[n];
+    const slot = p.bag[n];
     if (!slot) return;
     const it = slot.item;
-    if (it.type === ITEM.KEY || it.type === ITEM.GOLDKEY) return; // spent by walking into a door
+
+    if (it.type === ITEM.WEAPON || it.type === ITEM.ARMOR) { this.equipFrom(p, n); return; }
+    if (it.type === ITEM.KEY || it.type === ITEM.GOLDKEY) return;  // spent on doors
 
     if (it.type === ITEM.FOOD) {
       p.hunger = HUNGER_MAX;
@@ -422,8 +552,9 @@ export class Game {
       this.drink(p, f, it.kind);
     } else if (it.type === ITEM.SCROLL) {
       this.read(p, f, it.kind);
-    }
-    if (--slot.count <= 0) p.inv.splice(n, 1);
+    } else return;
+
+    if (--slot.count <= 0) p.bag[n] = null;
     this.metaDirty = true;
   }
 
@@ -434,7 +565,7 @@ export class Game {
     }
     this.fx(f, 'drink', p.x + 8, p.y + 8);
     switch (kind) {
-      case POTION.HEALING: this.healPlayer(p, Math.round(p.maxHp * 0.7)); break;
+      case POTION.HEALING: this.healPlayer(p, Math.round(p.maxHp * 0.7 * p.stats.potionMult)); break;
       case POTION.STRENGTH: p.maxHp += 3; p.hp += 3; this.banner(`${p.name} FEELS STRONGER`, 1500); break;
       case POTION.HASTE: p.haste = 450; break;
       case POTION.INVIS: p.invis = 450; break;
@@ -454,13 +585,17 @@ export class Game {
     }
     this.fx(f, 'read', p.x + 8, p.y + 8);
     switch (kind) {
-      case SCROLL.UPGRADE:
-        if (p.weapon.tier * 3 + p.weapon.upgrade <= p.armor.tier * 3 + p.armor.upgrade) p.weapon.upgrade++;
-        else p.armor.upgrade++;
+      case SCROLL.UPGRADE: {
+        const w = p.equip.weapon, a = p.equip.armor;
+        if (w.tier * 3 + w.upgrade <= a.tier * 3 + a.upgrade) w.upgrade++;
+        else a.upgrade++;
+        this.recalc(p);
         this.banner(`${p.name}'S GEAR GLOWS`, 1600);
         break;
+      }
       case SCROLL.IDENTIFY: {
-        for (const s of p.inv) {
+        for (const s of p.bag) {
+          if (!s) continue;
           if (s.item.type === ITEM.POTION && !this.known.potions.includes(s.item.kind)) {
             this.known.potions.push(s.item.kind);
             this.banner(`IT IS A POTION OF ${s.item.kind.toUpperCase()}`, 1800);
@@ -525,7 +660,7 @@ export class Game {
   }
 
   hunger(p) {
-    if (p.hunger > 0) { p.hunger--; return; }
+    if (p.hunger > 0) { p.hunger -= p.stats.hungerMult; return; }
     if (++p.hungerTick >= HUNGER_HURT) {
       p.hungerTick = 0;
       this.hurtPlayer(p, 2, p.x + 8, p.y + 8);
@@ -690,7 +825,7 @@ export class Game {
         if (!rectsOverlap(p.x + PLAYER_BOX.x, p.y + PLAYER_BOX.y, PLAYER_BOX.w, PLAYER_BOX.h,
                           e.x + e.box.x, e.y + e.box.y, e.box.w, e.box.h)) continue;
         e.hitCd = 32;
-        this.hurtPlayer(p, e.dmg, e.x + 8, e.y + 8);
+        this.hurtPlayer(p, e.dmg, e.x + 8, e.y + 8, e);
         if (st.drains) e.hp = Math.min(e.maxHp, e.hp + 3);
         if (st.ai === 'thief' && p.gold > 0) {
           const stolen = Math.min(p.gold, 25 + f.depth * 3);
@@ -946,9 +1081,12 @@ export class Game {
     if (e.friendly) {
       for (const m of f.ents) {
         if (m.dead || !isMob(m.kind)) continue;
+        if (e.hitIds?.includes(m.id)) continue;
         if (!rectsOverlap(e.x + 4, e.y + 4, 8, 8,
                           m.x + m.box.x, m.y + m.box.y, m.box.w, m.box.h)) continue;
         this.hurtMob(m, e.dmg, e.dir, f, this.players.get(e.owner));
+        if (e.snare) m.frozen = Math.max(m.frozen, e.snare);
+        if (e.pierce > 0) { e.pierce--; e.hitIds = (e.hitIds || []).concat(m.id); continue; }
         e.dead = true;
         return;
       }
@@ -1046,7 +1184,7 @@ export class Game {
     const here = tileUnder(p, PLAYER_BOX);
     if (here === p.fovTile) return;
     p.fovTile = here;
-    viewFrom(f.level, here, CLASSES[p.cls].sight, p.fov);
+    viewFrom(f.level, here, CLASSES[p.cls].sight + p.stats.sight, p.fov);
     for (let i = 0; i < LEVEL_LEN; i++) {
       if (p.fov[i] && !f.explored[i]) { f.explored[i] = 1; f.mapDirty = true; }
     }
@@ -1071,6 +1209,9 @@ export class Game {
   }
 
   restart() {
+    // Whoever called this — a player pressing on, or the timer after a wipe —
+    // the clients have to be told, or they sit on the death screen forever.
+    this.announceStart = true;
     this.seed = (Math.random() * 0x7fffffff) | 0;
     this.app = makeAppearances(this.seed);
     this.known = { potions: [], scrolls: [] };
@@ -1081,12 +1222,18 @@ export class Game {
       const keep = { id: p.id, name: p.name, cls: p.cls, colour: p.colour, ready: p.ready };
       Object.assign(p, newPlayerState(), keep, {
         depth: 1, hp: def.hp, maxHp: def.hp, level: 1, xp: 0, gold: 0,
-        weapon: { tier: 1, upgrade: 0 }, armor: { tier: 1, upgrade: 0 },
-        inv: [], hunger: HUNGER_MAX, hungerTick: 0, kills: 0,
+        equip: { weapon: { type: ITEM.WEAPON, tier: 1, upgrade: 0 },
+                 armor: { type: ITEM.ARMOR, tier: 1, upgrade: 0 } },
+        bag: new Array(BAG_BASE).fill(null),
+        perks: {}, perkPoints: 0,
+        hunger: HUNGER_MAX, hungerTick: 0, regenTick: 0, kills: 0,
         invuln: 0, invis: 0, haste: 0, might: 0,
         fov: p.fov, fovTile: -1, queue: [], input: 0, seq: p.seq,
         needFloor: true,
       });
+      p.bag[0] = { key: ITEM.FOOD, item: { type: ITEM.FOOD }, count: 2 };
+      this.recalc(p);
+      p.hp = p.maxHp;
     }
     this.begin();
   }
@@ -1113,10 +1260,12 @@ export class Game {
     const f = this.floor(p.depth);
     const ents = [];
     const items = [];
+    const sense = p.stats.senseMobs * TILE;
     for (const e of f.ents) {
       if (e.dead) continue;
       const t = tileUnder(e, e.box);
-      if (!p.fov[t]) continue;                       // fog hides what you cannot see
+      // fog hides what you cannot see — unless you can feel it moving
+      if (!p.fov[t] && !(sense && isMob(e.kind) && dist2(p.x, p.y, e.x, e.y) < sense * sense)) continue;
       if (e.kind === KIND.ITEM) {
         const it = e.item;
         items.push([e.id, Math.round(e.x), Math.round(e.y), it.type,
@@ -1152,7 +1301,8 @@ export class Game {
       me: [Math.round(p.x), Math.round(p.y), p.dir, p.atk, p.hp, p.maxHp,
            p.level, p.xp, XP_PER_LEVEL(p.level), p.ghost ? 1 : 0, p.invuln,
            p.abilityCd, p.knockT, Math.round(p.knockX), Math.round(p.knockY),
-           p.stun, p.gold, p.hunger, p.invis, p.reviveT | 0, p.revivedBy | 0],
+           p.stun, p.gold, Math.round(p.hunger), p.invis, p.reviveT | 0,
+           p.revivedBy | 0, p.perkPoints],
       e: ents, it: items, o: others, pl: party,
       f: f.fx, tc: f.changes,
     };
@@ -1168,8 +1318,10 @@ export class Game {
       players: [...this.players.values()].map(o => ({
         id: o.id, name: o.name, cls: o.cls, depth: o.depth,
         hp: o.hp, maxHp: o.maxHp, level: o.level, gold: o.gold,
-        weapon: o.weapon, armor: o.armor,
-        inv: o.inv.map(s => ({ item: s.item, count: s.count })),
+        equip: o.equip,
+        perks: o.perks, perkPoints: o.perkPoints,
+        mods: o.mods,
+        bag: o.bag.map(s => (s ? { item: s.item, count: s.count } : null)),
       })),
     };
   }

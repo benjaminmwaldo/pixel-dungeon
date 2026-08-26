@@ -29,6 +29,13 @@ whole level, fog of war, and twenty-five floors in five themed chapters.
 - **All art hand-authored** — 148 sprites plus an 8x8 font, one tileset baked
   in five palettes, five 32x32 bosses generated from shape primitives.
 - **Original chip audio** — a loop per chapter plus a boss theme.
+- **Perk trees.** One point per level, three shared trees plus one per class,
+  36 perks with prerequisite chains and multiple ranks. Every perk folds into a
+  single stat block the simulation reads — there are no decorative perks.
+- **A real inventory.** A 16-24 slot pack whose first eight slots are the quick
+  bar. Gear waits in the pack rather than auto-equipping; you can equip, move
+  between slots, and drop items on the floor to hand them to a teammate.
+  Neither panel pauses the world, which is the honest answer in co-op.
 
 ## Notes for future work
 
@@ -55,6 +62,10 @@ whole level, fog of war, and twenty-five floors in five themed chapters.
   flood fill rather than trusting the graph.
 - Boss floors reported their sealed exit as unreachable to the test harness;
   a locked stair is now "found but not passed" rather than skipped.
+- **A wiped party was never told the run had restarted.** The server's timer
+  called `restart()` but only the explicit "play again" path broadcast the
+  start message, so every client sat on the death screen forever while a fresh
+  dungeon ran underneath them.
 - Encounters were far too rare in real time — monsters only noticed you on
   line of sight. They now hear you within six tiles, and floors carry more
   monsters and more loot.

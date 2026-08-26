@@ -47,8 +47,13 @@ export class Input {
 
     if (/^Digit[1-8]$/.test(e.code)) { this.emit({ type: 'slot', n: Number(e.code[5]) - 1 }); return; }
 
+    if (e.code === 'Tab') e.preventDefault();
+
     switch (e.code) {
       case 'KeyE': case 'Space': this.emit({ type: 'act' }); break;
+      case 'KeyI': this.emit({ type: 'pack' }); break;
+      case 'KeyK': this.emit({ type: 'skills' }); break;
+      case 'Tab': this.emit({ type: 'tab' }); break;
       case 'Enter': case 'NumpadEnter': this.emit({ type: 'start' }); break;
       case 'Escape': this.emit({ type: 'cancel' }); break;
       case 'KeyC': case 'ShiftLeft': case 'ShiftRight': this.emit({ type: 'cycle' }); break;

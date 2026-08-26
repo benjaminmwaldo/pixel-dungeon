@@ -299,6 +299,9 @@ export class Renderer {
 
     this.bar(42, 29, 92, 4, Math.min(1, me.xp / Math.max(1, me.xpNext)), C.blue);
     text(g, `LV${me.level}`, 138, 29, 'blue', 6);
+    if (st.perkPoints > 0 && (this.frame >> 4) % 2 === 0) {
+      text(g, `+${st.perkPoints} K`, 160, 29, 'gold', 6);
+    }
 
     const hunger = Math.max(0, Math.min(1, me.hunger / HUNGER_MAX));
     this.bar(42, 36, 92, 3, hunger, hunger > 0.25 ? '#B07030' : C.red);
@@ -310,7 +313,7 @@ export class Renderer {
 
     for (let i = 0; i < 8; i++) {
       const x = 180 + i * 17;
-      const slot = st.inv[i];
+      const slot = (st.bag || [])[i];
       g.fillStyle = slot ? C.dark : '#0A0C14';
       g.fillRect(x, 13, 16, 16);
       g.fillStyle = '#000000';
