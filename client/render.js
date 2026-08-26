@@ -622,7 +622,7 @@ export class Renderer {
       text(g, `${p.name}  ${String(p.kills).padStart(3, '0')}`, 80, 154 + i * 16, 'white');
     });
 
-    textCentered(g, 'PRESS ENTER TO DELVE AGAIN', 128, 222, 'gold');
+    textCentered(g, 'PRESS ENTER TO DELVE AGAIN', 128, 210, 'gold');
   }
 
   drawConnecting(msg) {

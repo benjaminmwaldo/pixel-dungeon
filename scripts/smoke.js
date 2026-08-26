@@ -89,6 +89,41 @@ for (let i = 0; i < 260; i++) {
 }
 check('the wyrm breathes fire', breathed > 0, `${breathed} ticks with fire in the air`);
 
+// --- a wiped party is pulled back to the entrance, progress intact --------
+p.room = '3,3'; p.trans = 0; p.ghost = false; p.hp = 2; p.invuln = 0;
+const openedBefore = g.room('2,5').opened[W];
+g.hurtPlayer(p, 4, p.x + 10, p.y);
+check('the last hero falling ends the run', p.ghost);
+g.step();
+check('the crypt takes over', g.state === 'over', g.state);
+for (let i = 0; i < 120; i++) g.step();
+check('and returns the party to the entrance', g.state === 'play' && p.room === '3,6' && !p.ghost,
+  `${g.state} ${p.room}`);
+check('with full hearts', p.hp === p.maxHp, `${p.hp}/${p.maxHp}`);
+check('and the doors you opened still open', g.room('2,5').opened[W] === openedBefore);
+
+// --- co-op: a downed hero can be revived by a friend ----------------------
+const q = g.addPlayer(2, 'JASON');
+q.room = '3,6'; q.x = 120; q.y = 100; q.trans = 0;
+p.room = '3,6'; p.x = 120; p.y = 100; p.trans = 0; p.invuln = 0;
+g.hurtPlayer(p, 99, 200, 100);
+check('a hero at zero hearts becomes a spirit', p.ghost && !q.ghost);
+for (let i = 0; i < 80; i++) { p.x = q.x; p.y = q.y; g.step(); g.clearFx(); }
+check('standing on a spirit brings them back', !p.ghost, `hp=${p.hp}`);
+g.removePlayer(2);
+
+// --- the relic ends the delve ---------------------------------------------
+p.room = '3,0'; p.trans = 0; p.ghost = false; p.hp = p.maxHp;
+g.step();
+const relic = g.room('3,0').ents.find(e => e.kind === KIND.DROP);
+check('the relic is on its altar', !!relic);
+if (relic) {
+  p.x = relic.x; p.y = relic.y;
+  for (let i = 0; i < 20 && g.state === 'play'; i++) { g.step(); g.clearFx(); }
+}
+check('taking it wins the run', g.state === 'win', g.state);
+check('the party holds the relic', g.party.relic);
+
 // --- snapshot size --------------------------------------------------------
 const snap = JSON.stringify(g.snapshotFor(p));
 check('snapshot stays small', snap.length < 2000, `${snap.length} bytes`);
