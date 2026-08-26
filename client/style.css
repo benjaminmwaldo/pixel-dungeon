@@ -1,0 +1,97 @@
+:root {
+  --ink: #05050c;
+  --stone: #404058;
+  --stone-lit: #808098;
+  --gold: #f8b800;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--ink);
+  color: #c0c0d8;
+  overflow: hidden;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  font-family: ui-monospace, "Courier New", monospace;
+}
+
+#frame {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 6px;
+  background:
+    radial-gradient(circle at 50% 30%, #12122a 0%, #05050c 70%);
+}
+
+#screen {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  display: block;
+  border: 3px solid var(--stone);
+  box-shadow: 0 0 0 3px #0a0a12, 0 8px 40px rgba(0, 0, 0, 0.9);
+  background: #000;
+}
+
+/* --- touch controls: only on devices that need them --------------------- */
+#touch { display: none; }
+
+@media (hover: none) and (pointer: coarse) {
+  #touch {
+    display: flex;
+    width: 100%;
+    max-width: 520px;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 10px;
+  }
+}
+
+#dpad {
+  position: relative;
+  width: 132px;
+  height: 132px;
+}
+
+.pad {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  background: #1a1a30;
+  border: 2px solid var(--stone);
+}
+
+.pad.held, .btn.held { background: var(--stone-lit); }
+
+#pad-up { left: 44px; top: 0; }
+#pad-left { left: 0; top: 44px; }
+#pad-right { left: 88px; top: 44px; }
+#pad-down { left: 44px; top: 88px; }
+
+#buttons {
+  display: grid;
+  grid-template-columns: repeat(2, 60px);
+  gap: 10px;
+  align-items: center;
+}
+
+.btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+  background: #1a1a30;
+  border: 2px solid var(--stone);
+  color: var(--gold);
+  font-size: 13px;
+  letter-spacing: 1px;
+}
+
+.btn.big { height: 60px; border-radius: 50%; font-size: 18px; }

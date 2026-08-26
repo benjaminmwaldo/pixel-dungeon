@@ -1,0 +1,14 @@
+{
+  "name": "pixel-dungeon",
+  "version": "1.0.0",
+  "description": "Real-time multiplayer pixel dungeon crawler in the style of the original Legend of Zelda. Zero dependencies.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node server/index.js --port 8080"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
