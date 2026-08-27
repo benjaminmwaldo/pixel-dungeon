@@ -1,6 +1,7 @@
 # Status — Pixel Dungeon (real-time co-op)
 
-**As of 2026-08-26: playable start to finish.**
+**As of 2026-08-26: playable start to finish, and live at
+<https://benjaminmwaldo.github.io/pixel-dungeon/>.**
 
 Rebuilt from the earlier room-based Zelda-style game into a real-time
 *Pixel Dungeon*: procedurally generated floors, a scrolling camera over the
@@ -29,6 +30,15 @@ whole level, fog of war, and twenty-five floors in five themed chapters.
 - **All art hand-authored** — 148 sprites plus an 8x8 font, one tileset baked
   in five palettes, five 32x32 bosses generated from shape primitives.
 - **Original chip audio** — a loop per chapter plus a boss theme.
+- **Three ways to play, one simulation.** `shared/session.js` owns the tick loop
+  and message pump and is handed `send`/`broadcast`, so it does not know its
+  transport. Solo runs it in your own tab with no network at all; a hosted
+  party runs it in the host's tab with guests on WebRTC data channels; and
+  `node server/index.js` runs the same class for LAN play (`?lan=1`).
+- **Deployed to GitHub Pages** by Actions on every push to main, the same shape
+  as the dawnfall-protocol repo. No bundler and no base-path variable — every
+  path in the page is relative, so the files work at the root or under a
+  repo subpath.
 - **Perk trees.** One point per level, three shared trees plus one per class,
   36 perks with prerequisite chains and multiple ranks. Every perk folds into a
   single stat block the simulation reads — there are no decorative perks.
@@ -38,6 +48,14 @@ whole level, fog of war, and twenty-five floors in five themed chapters.
   Neither panel pauses the world, which is the honest answer in co-op.
 
 ## Notes for future work
+
+- The public build depends on PeerJS's free broker for introductions only, and
+  that broker offers STUN but no TURN relay. Strict corporate, school or
+  symmetric-NAT networks may refuse the connection; home wifi and hotspots are
+  the target. If that ever bites, the fix is a TURN server, not a rewrite.
+- One smoke-test run failed twice during a full sweep and could not be
+  reproduced in 25 consecutive runs afterwards. Not chased down; the CI
+  workflow runs the suite on every push, which will surface it if it recurs.
 
 - Difficulty is not yet playtested with real people. Contact damage, mercy
   frames and mob density were tuned against an automated player, which fights
