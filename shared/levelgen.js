@@ -10,6 +10,7 @@ import {
   LEVEL_W, LEVEL_H, LEVEL_LEN, TT, idx, tx, ty, inBounds,
   passable, spawnable, regionOf, isBossDepth, rngFor,
 } from './terrain.js';
+import { rollTrap } from './traps.js';
 
 const MIN_SIZE = 7;
 const MAX_SIZE = 9;
@@ -171,16 +172,20 @@ function regularFloor(depth, rng) {
   }
 
   // 10. traps, only where someone can actually walk into one
-  const trapCount = Math.min(12, 1 + Math.floor(depth * 0.7));
+  const traps = {};
+  const trapCount = Math.min(14, 2 + Math.floor(depth * 0.8));
   for (let n = 0; n < trapCount; n++) {
     const i = randomFloor(tiles, rng, rooms, entrance);
-    if (i !== null && reach[i] && tiles[i] === TT.FLOOR) tiles[i] = TT.TRAP_HIDDEN;
+    if (i !== null && reach[i] && tiles[i] === TT.FLOOR) {
+      tiles[i] = TT.TRAP_HIDDEN;
+      traps[i] = rollTrap(depth, rng);
+    }
   }
 
   return finish({
     depth, region: region.key, tiles, rooms,
     entrance: entIdx, exit: exitIdx,
-    vaultRoom: vault, keySpot, boss: false,
+    vaultRoom: vault, keySpot, boss: false, traps,
   }, rng);
 }
 
@@ -215,7 +220,7 @@ function bossFloor(depth, rng) {
   return finish({
     depth, region: region.key, tiles, rooms: [arena, approach],
     entrance: entIdx, exit: exitIdx,
-    vaultRoom: null, keySpot: null, boss: true,
+    vaultRoom: null, keySpot: null, boss: true, traps: {},
     arena: { x: 15 * 16, y: 8 * 16 },
   }, rng);
 }

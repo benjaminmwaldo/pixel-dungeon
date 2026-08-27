@@ -20,11 +20,14 @@ import {
 import { newPlayerState, playerStep, meleeBox } from './player.js';
 import { MOBS, SPAWNS, BOSS_OF, mobBudget, scaleFor, HEARING } from './mobs.js';
 import {
-  ITEM, POTION, SCROLL, makeAppearances, rollLoot, rollPrize, rollDrop,
-  WEAPONS, ARMORS, isConsumable, stackKey,
+  ITEM, POTION, SCROLL, POTION_KINDS, SCROLL_KINDS, makeAppearances,
+  rollLoot, rollPrize, rollDrop, WEAPONS, ARMORS, isConsumable, stackKey,
 } from './items.js';
 import { computeStats, canTake, clientMods, PERKS } from './perks.js';
 import { toBase64 } from './b64.js';
+import * as BF from './buffs.js';
+import { B } from './buffs.js';
+import { TRAPS, TRAP, trapIndex } from './traps.js';
 
 const QUICK_SLOTS = 8;
 const BAG_BASE = 16;
@@ -106,6 +109,7 @@ export class Game {
       input: 0, seq: 0, queue: [], ready: false,
       fov: new Uint8Array(LEVEL_LEN), fovTile: -1,
       invis: 0, haste: 0, might: 0, kills: 0, needFloor: true,
+      buffs: {}, moveMult: 1, shield: 0,
     });
     p.bag[0] = { key: ITEM.FOOD, item: { type: ITEM.FOOD }, count: 2 };
     this.recalc(p);
@@ -198,6 +202,22 @@ export class Game {
     if (p.haste > 0) p.haste--;
     if (p.might > 0) p.might--;
 
+    // timed effects: damage, mending, and everything they change about you
+    const up = BF.tickBuffs(p);
+    if (up.damage) this.hurtPlayer(p, Math.ceil(up.damage), p.x + 8, p.y + 40, null, true);
+    if (up.heal) this.healPlayer(p, Math.ceil(up.heal));
+    if (up.recharge && p.abilityCd > 0) p.abilityCd = Math.max(0, p.abilityCd - up.recharge);
+    const eff = BF.summarise(p);
+    p.effects = eff;
+    p.moveMult = eff.move;
+    p.shield = eff.shield;
+    p.liveMods = { ...p.mods, speedMult: p.mods.speedMult * eff.move };
+    if (eff.invisible) p.invis = Math.max(p.invis, 2);
+    // standing in fire, or in water that puts it out
+    const under = f.tiles[tileUnder(p, PLAYER_BOX)];
+    if (under === TT.WATER) { BF.clear(p, B.BURNING); }
+    if (under === TT.EMBERS && Math.random() < 0.02) BF.apply(p, B.BURNING, 90);
+
     if (p.ghost) {
       p.reviveT--;
       const helper = this.livingOn(p.depth).find(o =>
@@ -210,11 +230,12 @@ export class Game {
         p.x = spot.x; p.y = spot.y;
         this.revive(p, f);
       }
-      playerStep(p, p.input, f.tiles, p.cls, p.mods);
+      playerStep(p, p.input, f.tiles, p.cls, p.liveMods || p.mods);
       return;
     }
 
-    const ev = playerStep(p, p.input, f.tiles, p.cls, p.mods);
+    const frozen = p.effects?.frozen;
+    const ev = playerStep(p, frozen ? 0 : p.input, f.tiles, p.cls, p.liveMods || p.mods);
 
     // walking into a shut door opens it; a locked one wants this floor's key
     if (ev.blockedBy >= 0) {
@@ -262,19 +283,31 @@ export class Game {
     this.metaDirty = true;
   }
 
-  hurtPlayer(p, dmg, sx, sy, from) {
-    if (p.ghost || p.invuln > 0 || this.state !== 'play') return;
+  hurtPlayer(p, dmg, sx, sy, from, ignoreMercy = false) {
+    if (p.ghost || this.state !== 'play') return;
+    if (p.invuln > 0 && !ignoreMercy) return;
     const st = p.stats;
+    const f = this.floor(p.depth);
+    dmg *= (p.effects?.taken ?? 1);
     const gear = p.equip.armor;
     const armour = ARMORS[gear.tier - 1].def + gear.upgrade * 1.5 + st.armour;
     let taken = Math.max(1, Math.round(dmg - armour * 0.5));
     if (p.guarding) {
       taken = Math.max(0, Math.round(taken * st.guard));
       if (st.reflect && from && !from.dead) {
-        this.hurtMob(from, Math.round(dmg * st.reflect), p.dir, this.floor(p.depth), p);
+        this.hurtMob(from, Math.round(dmg * st.reflect), p.dir, f, p);
       }
     }
     if (st.manaShield < 1 && p.abilityCd <= 0) taken = Math.round(taken * st.manaShield);
+    // a barrier soaks damage before your skin does
+    if (p.shield > 0) {
+      const soaked = Math.min(p.shield, taken);
+      taken -= soaked;
+      const bar = p.buffs?.[B.BARRIER];
+      if (bar) { bar.m -= soaked; if (bar.m <= 0) BF.clear(p, B.BARRIER); }
+      p.shield -= soaked;
+      this.fx(f, 'clang', p.x + 8, p.y + 8);
+    }
     if (st.lastStand < 1 && p.hp < p.maxHp * 0.25) taken = Math.round(taken * st.lastStand);
     // a warlord standing with you takes the edge off
     for (const o of this.livingOn(p.depth)) {
@@ -282,8 +315,7 @@ export class Game {
       if (dist2(o.x, o.y, p.x, p.y) < 64 * 64) { taken = Math.round(taken * o.stats.aura); break; }
     }
     p.hp -= Math.max(0, taken);
-    p.invuln = Math.round(INVULN_TICKS * st.invulnMult);
-    const f = this.floor(p.depth);
+    if (!ignoreMercy) p.invuln = Math.round(INVULN_TICKS * st.invulnMult);
     if (!p.stats.steady) {
       const dx = (p.x + 8) - sx, dy = (p.y + 8) - sy;
       const len = Math.hypot(dx, dy) || 1;
@@ -339,7 +371,7 @@ export class Game {
       if (e.dead || !isMob(e.kind)) continue;
       if (!rectsOverlap(box.x, box.y, box.w, box.h,
                         e.x + e.box.x, e.y + e.box.y, e.box.w, e.box.h)) continue;
-      let dmg = base;
+      let dmg = base * (p.effects?.dealt ?? 1);
       if (p.might > 0) dmg *= 1.5;
       if (st.berserk > 1 && p.hp < p.maxHp * 0.4) dmg *= st.berserk;
       if (st.execute > 1 && e.hp < e.maxHp * 0.3) dmg *= st.execute;
@@ -410,13 +442,86 @@ export class Game {
   }
 
   springTrap(p, f, i) {
-    this.fx(f, 'trap', tx(i) * TILE + 8, ty(i) * TILE + 8);
-    this.hurtPlayer(p, 3 + f.depth, p.x + 8, p.y + 20);
-    this.banner('A TRAP!', 900);
-    const region = regionOf(f.depth);
-    if (region.key === 'caves' || region.key === 'halls') {
-      for (const e of f.ents) if (isMob(e.kind)) e.alerted = 600;
+    const kind = f.level.traps?.[i] || TRAP.DART;
+    const def = TRAPS[kind];
+    const x = tx(i) * TILE + 8, y = ty(i) * TILE + 8;
+    this.fx(f, def.blast ? 'blast' : 'trap', x, y);
+    this.banner(def.name, 1300);
+
+    if (def.dmg) {
+      const dmg = Math.round(def.dmg * (1 + f.depth * 0.18));
+      if (def.area) {
+        this.burst(f, x, y, def.area, dmg, null);
+        this.hurtPlayer(p, dmg, x, y, null, true);
+      } else {
+        this.hurtPlayer(p, dmg, x, y, null, true);
+      }
     }
+    if (def.buff) this.afflict(p, def.buff[0], def.buff[1], def.buff[2] || 1, f);
+    if (def.cloud) this.cloud(f, x, y, def.cloud[2], def.cloud[0], def.cloud[1], null);
+    if (def.scorch) f.set(i, TT.EMBERS);
+    if (def.wet) {
+      f.set(i, TT.WATER);
+      BF.clear(p, B.BURNING);
+    }
+    if (def.knock) {
+      p.knockX = 0; p.knockY = def.knock;
+      p.knockT = KNOCKBACK_TICKS + 2;
+    }
+    if (def.alarm) {
+      for (const e of f.ents) if (isMob(e.kind)) e.alerted = 900;
+      this.banner('THE WHOLE FLOOR HEARD THAT', 1500);
+    }
+    if (def.summon) {
+      for (let n = 0; n < def.summon; n++) this.spawnNear(f, i);
+    }
+    if (def.guardian) {
+      const spot = tileToPixel(i, MOBS[KIND.GOLEM].box);
+      const guard = this.spawnMob(f, KIND.GOLEM, spot.x, spot.y);
+      guard.alerted = 900;
+    }
+    if (def.flock) {
+      for (let n = 0; n < 4; n++) this.spawnNear(f, i, KIND.SHEEP);
+    }
+    if (def.teleport || def.warp) {
+      const pts = f.level.spawnPoints;
+      if (pts.length) {
+        const spot = tileToPixel(pts[(Math.random() * pts.length) | 0], PLAYER_BOX);
+        p.x = spot.x; p.y = spot.y;
+        p.fovTile = -1;
+        this.fx(f, 'teleport', p.x + 8, p.y + 8);
+      }
+      if (def.warp && p.depth < MAX_DEPTH) this.descend(p, true);
+    }
+    if (def.fall && p.depth < MAX_DEPTH) {
+      this.banner(`${p.name} FALLS THROUGH THE FLOOR`, 1800);
+      this.descend(p, true);
+      this.hurtPlayer(p, 3 + Math.floor(f.depth * 0.6), p.x + 8, p.y + 8, null, true);
+    }
+    if (def.disarm && p.equip.weapon.tier > 1) {
+      const lost = p.equip.weapon;
+      p.equip.weapon = { type: ITEM.WEAPON, tier: 1, upgrade: 0 };
+      this.dropItem(f, i, lost);
+      this.recalc(p);
+      this.banner(`${p.name}'S WEAPON IS FLUNG AWAY`, 1700);
+    }
+  }
+
+  /** Drop something unpleasant next to a tile. */
+  spawnNear(f, tile, forceKind) {
+    const table = SPAWNS[regionOf(f.depth).key];
+    const kind = forceKind || table[f.rng.int(table.length)];
+    const pts = f.level.spawnPoints;
+    for (let n = 0; n < 12; n++) {
+      const at = pts.length ? pts[f.rng.int(pts.length)] : tile;
+      const near = Math.abs(tx(at) - tx(tile)) + Math.abs(ty(at) - ty(tile));
+      if (near > 7 && n < 8) continue;
+      const spot = tileToPixel(at, MOBS[kind]?.box || PLAYER_BOX);
+      const e = this.spawnMob(f, kind, spot.x, spot.y);
+      if (e) e.alerted = 600;
+      return e;
+    }
+    return null;
   }
 
   // --- loot ----------------------------------------------------------------
@@ -565,16 +670,43 @@ export class Game {
       this.banner(`IT WAS A POTION OF ${kind.toUpperCase()}`, 1800);
     }
     this.fx(f, 'drink', p.x + 8, p.y + 8);
+    const pot = p.stats.potionMult;
     switch (kind) {
-      case POTION.HEALING: this.healPlayer(p, Math.round(p.maxHp * 0.7 * p.stats.potionMult)); break;
-      case POTION.STRENGTH: p.maxHp += 3; p.hp += 3; this.banner(`${p.name} FEELS STRONGER`, 1500); break;
-      case POTION.HASTE: p.haste = 450; break;
-      case POTION.INVIS: p.invis = 450; break;
-      case POTION.MIGHT: p.might = 450; break;
-      case POTION.FIRE: this.burst(f, p.x + 8, p.y + 8, 44, 10 + f.depth, p); break;
-      case POTION.TOXIC: this.burst(f, p.x + 8, p.y + 8, 60, 6 + f.depth, p); break;
-      case POTION.FROST: this.freezeNear(f, p.x + 8, p.y + 8, 90); break;
-      case POTION.PARALYSIS: this.freezeNear(f, p.x + 8, p.y + 8, 130); break;
+      case POTION.HEALING:
+        this.healPlayer(p, Math.round(p.maxHp * 0.7 * pot));
+        BF.cleanse(p);
+        break;
+      case POTION.STRENGTH:
+        p.maxHp += 3; p.hp += 3;
+        this.banner(`${p.name} FEELS STRONGER`, 1500);
+        break;
+      case POTION.HASTE: this.afflict(p, B.HASTE, Math.round(600 * pot)); break;
+      case POTION.INVIS: this.afflict(p, B.INVISIBLE, Math.round(450 * pot)); break;
+      case POTION.LEVITATION: this.afflict(p, B.LEVITATION, Math.round(600 * pot)); break;
+      case POTION.MIND_VISION: this.afflict(p, B.MIND_VISION, Math.round(600 * pot)); break;
+      case POTION.EXPERIENCE:
+        this.gainXp(p, XP_PER_LEVEL(p.level));
+        this.banner(`${p.name} FEELS WISER`, 1500);
+        break;
+      case POTION.PURITY:
+        BF.cleanse(p);
+        this.afflict(p, B.BLESS, 300);
+        this.banner('THE AIR CLEARS', 1400);
+        break;
+      case POTION.FLAME:
+        this.cloud(f, p.x + 8, p.y + 8, 46, B.BURNING, 140, p);
+        this.burst(f, p.x + 8, p.y + 8, 44, 8 + f.depth, p);
+        break;
+      case POTION.TOXIC:
+        this.cloud(f, p.x + 8, p.y + 8, 64, B.POISON, 220, p);
+        break;
+      case POTION.PARALYSIS:
+        this.cloud(f, p.x + 8, p.y + 8, 64, B.PARALYSIS, 120, p);
+        break;
+      case POTION.FROST:
+        this.cloud(f, p.x + 8, p.y + 8, 64, B.FROZEN, 150, p);
+        this.fx(f, 'frost', p.x + 8, p.y + 8);
+        break;
       default: break;
     }
   }
@@ -595,24 +727,26 @@ export class Game {
         break;
       }
       case SCROLL.IDENTIFY: {
-        for (const s of p.bag) {
-          if (!s) continue;
-          if (s.item.type === ITEM.POTION && !this.known.potions.includes(s.item.kind)) {
-            this.known.potions.push(s.item.kind);
-            this.banner(`IT IS A POTION OF ${s.item.kind.toUpperCase()}`, 1800);
+        for (const slot of p.bag) {
+          if (!slot) continue;
+          const it = slot.item;
+          if (it.type === ITEM.POTION && !this.known.potions.includes(it.kind)) {
+            this.known.potions.push(it.kind);
+            this.banner(`IT IS A POTION OF ${it.kind.toUpperCase()}`, 1800);
             return;
           }
-          if (s.item.type === ITEM.SCROLL && !this.known.scrolls.includes(s.item.kind)) {
-            this.known.scrolls.push(s.item.kind);
-            this.banner(`IT IS A SCROLL OF ${s.item.kind.toUpperCase()}`, 1800);
+          if (it.type === ITEM.SCROLL && !this.known.scrolls.includes(it.kind)) {
+            this.known.scrolls.push(it.kind);
+            this.banner(`IT IS A SCROLL OF ${it.kind.toUpperCase()}`, 1800);
             return;
           }
         }
+        this.banner('NOTHING LEFT TO LEARN', 1400);
         break;
       }
       case SCROLL.MAPPING:
         f.explored.fill(1);
-        this.mapDirty = true;
+        f.mapDirty = true;
         this.banner('THE FLOOR LAYS ITSELF BARE', 1800);
         break;
       case SCROLL.TELEPORT: {
@@ -626,17 +760,121 @@ export class Game {
         break;
       }
       case SCROLL.TERROR:
-        for (const e of f.ents) if (isMob(e.kind) && !isBoss(e.kind)) e.fleeing = 300;
+        for (const e of f.ents) {
+          if (isMob(e.kind) && !isBoss(e.kind) && this.inSight(p, e)) {
+            this.afflict(e, B.TERROR, 400);
+          }
+        }
         this.banner('THE FLOOR RECOILS', 1500);
         break;
+      case SCROLL.LULLABY:
+        for (const e of f.ents) {
+          if (isMob(e.kind) && !isBoss(e.kind) && this.inSight(p, e)) {
+            this.afflict(e, B.SLEEP, 500);
+          }
+        }
+        this.banner('A LULLABY SETTLES OVER THE FLOOR', 1600);
+        break;
       case SCROLL.RAGE:
-        p.might = 600;
+        this.afflict(p, B.FURY, 500);
+        for (const e of f.ents) {
+          if (isMob(e.kind) && this.inSight(p, e)) e.alerted = 900;
+        }
         this.banner(`${p.name} BURNS WITH RAGE`, 1500);
         break;
+      case SCROLL.RETRIBUTION: {
+        const missing = 1 - (p.hp / Math.max(1, p.maxHp));
+        const dmg = Math.round((6 + f.depth) * (0.5 + missing * 2));
+        for (const e of f.ents) {
+          if (!isMob(e.kind) || !this.inSight(p, e)) continue;
+          this.hurtMob(e, dmg, S, f, p);
+          this.afflict(e, B.BLINDNESS, 200);
+        }
+        this.hurtPlayer(p, Math.round(p.hp * 0.25), p.x + 8, p.y + 8, null, true);
+        this.fx(f, 'blast', p.x + 8, p.y + 8);
+        this.banner('PAIN ANSWERS PAIN', 1600);
+        break;
+      }
       case SCROLL.RECHARGE:
         p.abilityCd = 0;
+        this.afflict(p, B.RECHARGING, 300);
+        break;
+      case SCROLL.REMOVE_CURSE:
+        BF.cleanse(p);
+        this.uncurse(p);
+        this.banner('A WEIGHT LIFTS', 1500);
+        break;
+      case SCROLL.TRANSMUTATION: {
+        const spots = p.bag.map((s2, i) => (s2 ? i : -1)).filter(i => i >= 0);
+        if (!spots.length) { this.banner('NOTHING TO CHANGE', 1300); break; }
+        const at = spots[(Math.random() * spots.length) | 0];
+        const now = this.transmute(p.bag[at].item, f);
+        if (now) {
+          p.bag[at] = { key: stackKey(now), item: now, count: p.bag[at].count };
+          this.banner('SOMETHING IN YOUR PACK CHANGES', 1600);
+          this.metaDirty = true;
+        }
+        break;
+      }
+      case SCROLL.MIRROR:
+        this.afflict(p, B.INVISIBLE, 150);
+        for (const e of f.ents) {
+          if (isMob(e.kind) && this.inSight(p, e)) this.afflict(e, B.AMOK, 300);
+        }
+        this.banner('COPIES OF YOU SCATTER AND FADE', 1700);
         break;
       default: break;
+    }
+  }
+
+  /** Turn an item into another of the same class. */
+  transmute(item, f) {
+    const rng = f.rng;
+    if (item.type === ITEM.POTION) {
+      const kinds = POTION_KINDS.filter(k => k !== item.kind);
+      return { type: ITEM.POTION, kind: kinds[rng.int(kinds.length)] };
+    }
+    if (item.type === ITEM.SCROLL) {
+      const kinds = SCROLL_KINDS.filter(k => k !== item.kind);
+      return { type: ITEM.SCROLL, kind: kinds[rng.int(kinds.length)] };
+    }
+    if (item.type === ITEM.WEAPON) {
+      return { type: ITEM.ARMOR, tier: item.tier, upgrade: item.upgrade || 0 };
+    }
+    if (item.type === ITEM.ARMOR) {
+      return { type: ITEM.WEAPON, tier: item.tier, upgrade: item.upgrade || 0 };
+    }
+    return null;
+  }
+
+  /** Lifts a curse from what you are wearing. */
+  uncurse(p) {
+    if (p.equip.weapon.cursed) { p.equip.weapon.cursed = false; this.recalc(p); }
+    if (p.equip.armor.cursed) { p.equip.armor.cursed = false; this.recalc(p); }
+  }
+
+  /** Is this thing in the hero's field of view right now? */
+  inSight(p, e) {
+    const t = tileUnder(e, e.box || PLAYER_BOX);
+    return !!p.fov[t];
+  }
+
+  /** Lay an effect over everything caught in a radius. */
+  cloud(f, x, y, radius, buff, ticks, from) {
+    for (const e of f.ents) {
+      if (e.dead || !isMob(e.kind)) continue;
+      if (dist2(x, y, e.x + 8, e.y + 8) > radius * radius) continue;
+      if (isBoss(e.kind) && (buff === B.PARALYSIS || buff === B.FROZEN)) {
+        this.afflict(e, B.SLOW, Math.round(ticks / 2), 1, f);
+        continue;
+      }
+      e.burner = from || null;
+      this.afflict(e, buff, ticks, 1, f);
+    }
+    for (const o of this.livingOn(f.depth)) {
+      if (o === from) continue;
+      if (dist2(x, y, o.x + 8, o.y + 8) > radius * radius) continue;
+      this.afflict(o, buff, Math.round(ticks * 0.6), 1, f);
     }
   }
 
@@ -653,10 +891,7 @@ export class Game {
   }
 
   freezeNear(f, x, y, ticks) {
-    for (const e of f.ents) {
-      if (e.dead || !isMob(e.kind) || isBoss(e.kind)) continue;
-      if (dist2(x, y, e.x + 8, e.y + 8) <= 70 * 70) e.frozen = ticks;
-    }
+    this.cloud(f, x, y, 70, B.FROZEN, ticks, null);
     this.fx(f, 'frost', x, y);
   }
 
@@ -693,10 +928,10 @@ export class Game {
     }
   }
 
-  descend(p) {
+  descend(p, forced = false) {
     if (p.depth >= MAX_DEPTH) return;
     const from = this.floor(p.depth);
-    if (from.level.boss && !from.bossDead) {
+    if (!forced && from.level.boss && !from.bossDead) {
       this.banner('THE WAY DOWN IS SEALED', 1400);
       return;
     }
@@ -779,6 +1014,7 @@ export class Game {
       hp: Math.round(st.hp * scale), maxHp: Math.round(st.hp * scale),
       dmg: Math.round(st.dmg * scale),
       t: 0, flash: 0, frozen: 0, alerted: 0, fleeing: 0, hitCd: 0, idle: 0,
+      buffs: {}, effects: null,
       cd: 30 + f.rng.int(60), phase: f.rng.int(60),
       vx: 0, vy: 0, knockT: 0, knockX: 0, knockY: 0,
     };
@@ -804,6 +1040,19 @@ export class Game {
       e.t++;
       if (e.flash > 0) e.flash--;
       if (e.hitCd > 0) e.hitCd--;
+      if (isMob(e.kind) && e.buffs) {
+        const up = BF.tickBuffs(e);
+        if (up.damage) this.hurtMob(e, Math.ceil(up.damage), S, f, e.burner || null, true);
+        if (up.heal) e.hp = Math.min(e.maxHp, e.hp + Math.ceil(up.heal));
+        if (e.dead) continue;
+        e.effects = BF.summarise(e);
+        // fire goes out in water, and catches in dry grass
+        const t = f.tiles[tileUnder(e, e.box)];
+        if (t === TT.WATER) BF.clear(e, B.BURNING);
+        else if (BF.has(e, B.BURNING) && (t === TT.GRASS || t === TT.HIGH_GRASS) && Math.random() < 0.05) {
+          f.set(tileUnder(e, e.box), TT.EMBERS);
+        }
+      }
       if (e.knockT > 0) {
         e.knockT--;
         moveActor(e, e.knockX, e.knockY, f.tiles, e.box, MODE.WALK, false);
@@ -811,6 +1060,7 @@ export class Game {
         continue;
       }
       if (e.frozen > 0) { e.frozen--; continue; }
+      if (e.effects?.frozen) continue;
       if (e.fleeing > 0) e.fleeing--;
       if (e.alerted > 0) e.alerted--;
       this.stepEntity(e, f, players);
@@ -819,14 +1069,16 @@ export class Game {
     // contact damage
     for (const e of f.ents) {
       if (e.dead || !isMob(e.kind) || e.frozen > 0 || e.hidden) continue;
+      if (e.effects?.frozen || e.effects?.ai === 'flee') continue;
       const st = MOBS[e.kind];
+      if (st.harmless) continue;
       for (const p of players) {
         if (p.invis > 0 && !isBoss(e.kind)) continue;
         if (e.hitCd > 0) break;
         if (!rectsOverlap(p.x + PLAYER_BOX.x, p.y + PLAYER_BOX.y, PLAYER_BOX.w, PLAYER_BOX.h,
                           e.x + e.box.x, e.y + e.box.y, e.box.w, e.box.h)) continue;
         e.hitCd = 32;
-        this.hurtPlayer(p, e.dmg, e.x + 8, e.y + 8, e);
+        this.hurtPlayer(p, Math.round(e.dmg * (e.effects?.dealt ?? 1)), e.x + 8, e.y + 8, e);
         if (st.drains) e.hp = Math.min(e.maxHp, e.hp + 3);
         if (st.ai === 'thief' && p.gold > 0) {
           const stolen = Math.min(p.gold, 25 + f.depth * 3);
@@ -904,7 +1156,29 @@ export class Game {
     if (st.ai === 'boss') return this.stepBoss(e, f, st, target);
 
     const mode = (st.ai === 'flyer' || st.phasing) ? MODE.FLY : MODE.WALK;
-    const speed = st.speed * (e.enraged ? 1.4 : 1);
+    const speed = st.speed * (e.enraged ? 1.4 : 1) * (e.effects?.move ?? 1);
+
+    const mind = e.effects?.ai;
+    if (mind === 'flee' && target) { this.stepAway(e, f, target, speed * 1.2, mode); return; }
+    if (mind === 'charm' && target) { this.stepChase(e, f, speed * 0.6, mode); return; }
+    if (mind === 'amok') {
+      // it attacks whatever is closest, friend or hero
+      let best = null, bd = Infinity;
+      for (const o of f.ents) {
+        if (o === e || o.dead || !isMob(o.kind)) continue;
+        const d = dist2(o.x, o.y, e.x, e.y);
+        if (d < bd) { bd = d; best = o; }
+      }
+      if (best && bd < 140 * 140) {
+        const dx = best.x - e.x, dy = best.y - e.y;
+        const dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? E : W) : (dy > 0 ? S : N);
+        e.dir = dir;
+        moveActor(e, DX[dir] * speed, DY[dir] * speed, f.tiles, e.box, mode, true);
+        clampToLevel(e, e.box);
+        if (bd < 20 * 20 && e.hitCd <= 0) { e.hitCd = 26; this.hurtMob(best, e.dmg, dir, f, null); }
+        return;
+      }
+    }
 
     if (e.fleeing > 0 && target) this.stepAway(e, f, target, speed, mode);
     else if (st.ai === 'flyer') this.stepFlyer(e, f, target, speed);
@@ -1119,15 +1393,17 @@ export class Game {
     }
   }
 
-  hurtMob(e, dmg, fromDir, f, byPlayer) {
-    if (e.flash > 3) return;
+  hurtMob(e, dmg, fromDir, f, byPlayer, overTime = false) {
+    if (e.flash > 3 && !overTime) return;
     const st = MOBS[e.kind];
-    const taken = Math.max(1, Math.round(dmg - (st.armour || 0)));
+    const scaled = dmg * (e.effects?.taken ?? 1);
+    const taken = Math.max(1, Math.round(scaled - (overTime ? 0 : (st.armour || 0))));
     e.hp -= taken;
-    e.flash = 6;
+    if (!overTime) e.flash = 6;
     e.alerted = 480;
+    BF.clear(e, B.SLEEP);
     if (e.hp > 0) {
-      if (!isBoss(e.kind)) {
+      if (!isBoss(e.kind) && !overTime) {
         e.knockX = DX[fromDir] * 3;
         e.knockY = DY[fromDir] * 3;
         e.knockT = 4;
@@ -1136,6 +1412,15 @@ export class Game {
       return;
     }
     this.killMob(e, f, byPlayer);
+  }
+
+  /** Put a timed effect on an actor and let the floor know about it. */
+  afflict(actor, id, ticks, mag = 1, f = null) {
+    BF.apply(actor, id, ticks, mag);
+    if (f) {
+      const def = BF.BUFFS[id];
+      this.fx(f, def?.bad ? 'hurt' : 'drink', actor.x + 8, actor.y + 8);
+    }
   }
 
   killMob(e, f, byPlayer) {
@@ -1185,7 +1470,8 @@ export class Game {
     const here = tileUnder(p, PLAYER_BOX);
     if (here === p.fovTile) return;
     p.fovTile = here;
-    viewFrom(f.level, here, CLASSES[p.cls].sight + p.stats.sight, p.fov);
+    const sight = Math.max(2, CLASSES[p.cls].sight + p.stats.sight + (p.effects?.sight || 0));
+    viewFrom(f.level, here, sight, p.fov);
     for (let i = 0; i < LEVEL_LEN; i++) {
       if (p.fov[i] && !f.explored[i]) { f.explored[i] = 1; f.mapDirty = true; }
     }
@@ -1253,6 +1539,8 @@ export class Game {
       explored: toBase64(f.explored),
       entrance: f.level.entrance,
       exit: f.level.exit,
+      traps: Object.fromEntries(
+        Object.entries(f.level.traps || {}).map(([i, k]) => [i, trapIndex(k)])),
       rooms: f.level.rooms.map(r => [r.l, r.t, r.r, r.b, r.type === 'tunnel' ? 1 : 0]),
     };
   }
@@ -1278,6 +1566,7 @@ export class Game {
         if (e.hidden) flags |= 4;
         if (e.mouth > 0) flags |= 8;
         if (e.enraged) flags |= 16;
+        flags |= BF.buffFlags(e) << 5;
         ents.push([e.id, e.kind, Math.round(e.x), Math.round(e.y), e.dir | 0, flags,
                    e.hp | 0, e.maxHp | 0]);
       }
@@ -1303,7 +1592,9 @@ export class Game {
            p.level, p.xp, XP_PER_LEVEL(p.level), p.ghost ? 1 : 0, p.invuln,
            p.abilityCd, p.knockT, Math.round(p.knockX), Math.round(p.knockY),
            p.stun, p.gold, Math.round(p.hunger), p.invis, p.reviveT | 0,
-           p.revivedBy | 0, p.perkPoints],
+           p.revivedBy | 0, p.perkPoints, Math.round((p.moveMult ?? 1) * 100),
+           Math.round(p.shield || 0)],
+      bf: BF.packBuffs(p),
       e: ents, it: items, o: others, pl: party,
       f: f.fx, tc: f.changes,
     };

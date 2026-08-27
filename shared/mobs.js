@@ -46,6 +46,9 @@ export const MOBS = {
   [KIND.EYE]:      { name: 'EVIL EYE', sprite: 'EYE', hp: 44, dmg: 18, speed: 1.3, xp: 42, ai: 'shooter', box: BIG, shot: KIND.BEAM, range: 170 },
   [KIND.SCORPIO]:  { name: 'SCORPIO', sprite: 'SCORPIO', hp: 46, dmg: 15, speed: 1.6, xp: 41, ai: 'shooter', box: BIG, shot: KIND.DART, range: 150, keepsAway: true },
 
+  // ---- harmless -----------------------------------------------------------
+  [KIND.SHEEP]:    { name: 'SHEEP', sprite: 'SHEEP', hp: 4, dmg: 0, speed: 1.1, xp: 0, ai: 'wander', box: BOX, harmless: true },
+
   // ---- the five chapter bosses -----------------------------------------
   [KIND.BOSS_GLUT]: {
     name: 'GLUT, THE SWOLLEN', sprite: 'BOSS_GLUT', hp: 90, dmg: 8, speed: 1.1, xp: 60,

@@ -10,25 +10,33 @@ export const ITEM = {
   BOMB: 'bomb', RELIC: 'relic',
 };
 
+// The twelve the original carries.
 export const POTION = {
-  HEALING: 'healing', STRENGTH: 'strength', HASTE: 'haste', INVIS: 'invis',
-  FIRE: 'fire', FROST: 'frost', MIGHT: 'might', TOXIC: 'toxic', PARALYSIS: 'paralysis',
+  HEALING: 'healing', STRENGTH: 'strength', HASTE: 'haste', INVIS: 'invisibility',
+  FLAME: 'liquid flame', FROST: 'frost', TOXIC: 'toxic gas', PARALYSIS: 'paralytic gas',
+  EXPERIENCE: 'experience', LEVITATION: 'levitation', MIND_VISION: 'mind vision',
+  PURITY: 'purity',
 };
 export const POTION_KINDS = Object.values(POTION);
 
 export const SCROLL = {
-  UPGRADE: 'upgrade', IDENTIFY: 'identify', MAPPING: 'mapping',
-  TELEPORT: 'teleport', TERROR: 'terror', RECHARGE: 'recharge', RAGE: 'rage',
+  UPGRADE: 'upgrade', IDENTIFY: 'identify', MAPPING: 'magic mapping',
+  TELEPORT: 'teleportation', TERROR: 'terror', RECHARGE: 'recharging', RAGE: 'rage',
+  LULLABY: 'lullaby', RETRIBUTION: 'retribution', TRANSMUTATION: 'transmutation',
+  REMOVE_CURSE: 'remove curse', MIRROR: 'mirror image',
 };
 export const SCROLL_KINDS = Object.values(SCROLL);
 
-const POTION_LOOKS = ['CRIMSON', 'AZURE', 'GOLDEN', 'IVORY', 'JADE', 'AMBER', 'INDIGO', 'SILVER', 'ROSE'];
-const SCROLL_LOOKS = ['KAUNAN', 'SOWILO', 'LAGUZ', 'YNGVI', 'GYFU', 'RAIDO', 'ISAZ'];
+const POTION_LOOKS = ['CRIMSON', 'AZURE', 'GOLDEN', 'IVORY', 'JADE', 'AMBER', 'INDIGO',
+                      'SILVER', 'ROSE', 'CHARCOAL', 'BISTRE', 'TURQUOISE'];
+const SCROLL_LOOKS = ['KAUNAN', 'SOWILO', 'LAGUZ', 'YNGVI', 'GYFU', 'RAIDO', 'ISAZ',
+                      'MANNAZ', 'NAUDIZ', 'BERKANAN', 'ODAL', 'TIWAZ'];
 
 // The tint each glass colour is drawn in.
 export const POTION_TINT = {
   CRIMSON: '#F83800', AZURE: '#0078F8', GOLDEN: '#F8B800', IVORY: '#FCFCFC',
-  JADE: '#00A800', AMBER: '#FC9838', INDIGO: '#6844FC', SILVER: '#BCBCBC', ROSE: '#F878F8',
+  JADE: '#00A800', AMBER: '#FC9838', INDIGO: '#6844FC', SILVER: '#BCBCBC',
+  ROSE: '#F878F8', CHARCOAL: '#585868', BISTRE: '#7C4A18', TURQUOISE: '#00E8D8',
 };
 
 export const WEAPONS = [
@@ -103,11 +111,16 @@ export function stackKey(item) {
 // ---------------------------------------------------------------------------
 // What drops where
 // ---------------------------------------------------------------------------
-const COMMON_POTIONS = [POTION.HEALING, POTION.HEALING, POTION.HEALING, POTION.HASTE,
-                        POTION.INVIS, POTION.MIGHT, POTION.FIRE, POTION.FROST,
-                        POTION.TOXIC, POTION.PARALYSIS];
-const COMMON_SCROLLS = [SCROLL.UPGRADE, SCROLL.IDENTIFY, SCROLL.IDENTIFY, SCROLL.MAPPING,
-                        SCROLL.TELEPORT, SCROLL.TERROR, SCROLL.RAGE, SCROLL.RECHARGE];
+const COMMON_POTIONS = [
+  POTION.HEALING, POTION.HEALING, POTION.HEALING, POTION.HASTE, POTION.INVIS,
+  POTION.FLAME, POTION.FROST, POTION.TOXIC, POTION.PARALYSIS,
+  POTION.EXPERIENCE, POTION.LEVITATION, POTION.MIND_VISION, POTION.PURITY,
+];
+const COMMON_SCROLLS = [
+  SCROLL.UPGRADE, SCROLL.IDENTIFY, SCROLL.IDENTIFY, SCROLL.MAPPING,
+  SCROLL.TELEPORT, SCROLL.TERROR, SCROLL.RAGE, SCROLL.RECHARGE,
+  SCROLL.LULLABY, SCROLL.RETRIBUTION, SCROLL.TRANSMUTATION, SCROLL.REMOVE_CURSE,
+];
 
 /** A random floor drop for this depth. */
 export function rollLoot(depth, rng, { rich = false } = {}) {

@@ -7,6 +7,7 @@ import { LEVEL_LEN, LEVEL_W } from '../shared/terrain.js';
 import { newPlayerState, playerStep, NO_MODS } from '../shared/player.js';
 import { tileUnder } from '../shared/physics.js';
 import { viewFrom } from '../shared/fov.js';
+import { buffById, BUFFS } from '../shared/buffs.js';
 
 const RENDER_DELAY = 70;
 
@@ -126,6 +127,7 @@ export class Net {
     };
     this.entrance = m.entrance;
     this.exit = m.exit;
+    this.traps = m.traps || {};
     this.fovTile = -1;
     this.haveFloor = true;
     this.buffer.length = 0;
@@ -169,12 +171,16 @@ export class Net {
     this.gold = me[16]; this.hunger = me[17]; this.invis = me[18];
     this.reviveT = me[19]; this.revivedBy = me[20];
     this.livePoints = me[21] ?? this.perkPoints;
+    this.moveMult = (me[22] ?? 100) / 100;
+    this.shield = me[23] || 0;
+    this.buffs = (m.bf || []).map(([i, t, mag]) => ({ id: buffById(i), t, m: mag }))
+      .filter(b => b.id);
 
     const ack = m.a;
     this.history = this.history.filter(h => h.seq > ack);
     for (const h of this.history) {
       s.prev = h.prev;
-      playerStep(s, h.bits, this.tiles, this.cls, this.mods);
+      playerStep(s, h.bits, this.tiles, this.cls, this.liveMods());
     }
 
     this.err.x = clampErr(this.err.x + (prevX - s.x));
@@ -211,13 +217,21 @@ export class Net {
     for (let i = 0; i < LEVEL_LEN; i++) if (this.fov[i]) this.explored[i] = 1;
   }
 
+  /** Perk multipliers with any timed effects folded in, so prediction matches. */
+  liveMods() {
+    const mm = this.moveMult ?? 1;
+    return mm === 1 ? this.mods : { ...this.mods, speedMult: this.mods.speedMult * mm };
+  }
+
   tick(bits) {
     if (!this.haveFloor) return;
+    // held in place: send nothing, so both sides agree you did nothing
+    if (this.moveMult === 0) bits = 0;
     this.seq++;
     this.history.push({ seq: this.seq, bits, prev: this.local.prev });
     if (this.history.length > 90) this.history.shift();
     this.send({ t: 'in', s: this.seq, b: bits });
-    playerStep(this.local, bits, this.tiles, this.cls, this.mods);
+    playerStep(this.local, bits, this.tiles, this.cls, this.liveMods());
     this.refreshFov();
   }
 
@@ -263,6 +277,7 @@ export class Net {
       tiles: this.tiles,
       explored: this.explored,
       fov: this.fov,
+      traps: this.traps || {},
       me: {
         x: me.x + this.err.x, y: me.y + this.err.y,
         dir: me.dir, atk: me.atk, walk: me.walk, ghost: me.ghost,
@@ -273,6 +288,8 @@ export class Net {
       },
       ents, items, others,
       party: this.party,
+      buffs: this.buffs || [],
+      shield: this.shield || 0,
       bag: this.bag,
       equip: this.equip,
       perks: this.perks,

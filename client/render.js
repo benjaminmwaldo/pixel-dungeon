@@ -12,6 +12,8 @@ import {
 import { LEVEL_W, LEVEL_H, TT, idx, tx, ty, regionOf } from '../shared/terrain.js';
 import { ITEM, POTION_TINT } from '../shared/items.js';
 import { MOBS } from '../shared/mobs.js';
+import { BUFFS } from '../shared/buffs.js';
+import { TRAPS, trapById } from '../shared/traps.js';
 import {
   IMG, TILE_IMG, TILE_DIM, WATER_IMG, WATER_DIM, HERO_IMG, bakeAll,
   blit, text, textCentered, textWidth, silhouette, potionImg,
@@ -46,6 +48,7 @@ const MOB_SPRITE = {
   [KIND.DEMON]: ['DEMON1', 'DEMON2'],
   [KIND.EYE]: ['EYE1', 'EYE2'],
   [KIND.SCORPIO]: ['SCORPIO1', 'SCORPIO2'],
+  [KIND.SHEEP]: ['SHEEP1', 'SHEEP2'],
   [KIND.BOSS_GLUT]: ['BOSS_GLUT1', 'BOSS_GLUT2'],
   [KIND.BOSS_WARDEN]: ['BOSS_WARDEN1', 'BOSS_WARDEN2'],
   [KIND.BOSS_TYRANT]: ['BOSS_TYRANT1', 'BOSS_TYRANT2'],
@@ -141,6 +144,16 @@ export class Renderer {
         const img = t === TT.WATER ? (visible ? water : waterDim)
                                    : (visible ? lit[t] : remembered[t]);
         if (img) g.drawImage(img, x * TILE, y * TILE);
+        // a revealed trap wears the colour of what it will do to you
+        if (t === TT.TRAP && st.traps) {
+          const def = TRAPS[trapById(st.traps[i])];
+          if (def) {
+            g.fillStyle = def.colour;
+            g.globalAlpha = visible ? 1 : 0.4;
+            g.fillRect(x * TILE + 6, y * TILE + 6, 4, 4);
+            g.globalAlpha = 1;
+          }
+        }
       }
     }
 
@@ -216,10 +229,21 @@ export class Renderer {
       const big = isBoss(e.kind);
       let img = IMG[big ? (mouth ? pair[1] : pair[0]) : (((f >> 3) & 1) ? pair[1] : pair[0])];
       if (!img) return;
+      const burning = e.flags & (1 << 5);
+      const poisoned = e.flags & (2 << 5);
+      const held = e.flags & (4 << 5);
+      const maddened = e.flags & (8 << 5);
+      const warded = e.flags & (16 << 5);
+      const asleep = e.flags & (32 << 5);
       if (flash) img = silhouette(img, '#FCFCFC');
-      else if (frozen && ((f >> 2) & 1)) img = silhouette(img, '#9CE0FC');
+      else if (burning && ((f >> 1) & 1)) img = silhouette(img, '#F86018');
+      else if ((frozen || held) && ((f >> 2) & 1)) img = silhouette(img, '#9CE0FC');
+      else if (poisoned && ((f >> 3) & 3) === 0) img = silhouette(img, '#58C038');
+      else if (maddened && ((f >> 2) & 1)) img = silhouette(img, '#B048C8');
+      else if (warded && ((f >> 2) & 1)) img = silhouette(img, '#68C8F8');
       else if (e.flags & 16) img = silhouette(img, '#F87038');
       blit(g, img, e.x, e.y);
+      if (asleep && ((f >> 4) & 1)) text(g, 'Z', e.x + 12, e.y - 6, 'blue', 6);
       if (big) this.boss = e;
       else if (e.hp < e.maxHp) this.mobBar(e);
       return;
@@ -326,6 +350,8 @@ export class Renderer {
       text(g, String(i + 1), x + 5, 31, slot ? 'grey' : 'dark', 6);
     }
 
+    this.drawBuffs(st, 176, 33);
+
     let px = 42;
     for (const m of st.party) {
       g.fillStyle = CLASS_DOT[m.cls] || C.white;
@@ -334,6 +360,30 @@ export class Renderer {
       text(g, `${m.name.slice(0, 4)} ${label} F${m.depth}`, px + 5, 41,
         m.ghost ? 'red' : (m.id === st.myId ? 'white' : 'grey'), 6);
       px += 68;
+    }
+  }
+
+  /** Little coloured chips for whatever is currently happening to you. */
+  drawBuffs(st, x, y) {
+    const g = this.ctx;
+    const list = (st.buffs || []).slice(0, 10);
+    list.forEach((b, i) => {
+      const def = BUFFS[b.id];
+      if (!def) return;
+      const cx = x + i * 14;
+      const expiring = b.t < 60 && (this.frame >> 2) % 2 === 0;
+      g.fillStyle = expiring ? '#000000' : (def.colour || '#FCFCFC');
+      g.fillRect(cx, y, 12, 9);
+      g.fillStyle = '#000000';
+      g.fillRect(cx, y, 12, 1);
+      g.fillRect(cx, y + 8, 12, 1);
+      text(g, def.short, cx + 1, y + 1, 'black', 4);
+    });
+    if (st.shield > 0) {
+      const cx = x + list.length * 14;
+      g.fillStyle = '#68C8F8';
+      g.fillRect(cx, y, 12, 9);
+      text(g, String(Math.min(99, st.shield)), cx + 2, y + 1, 'black', 5);
     }
   }
 
