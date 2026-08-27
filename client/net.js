@@ -20,7 +20,7 @@ function unpack(b64) {
 export class Net {
   constructor(handlers) {
     this.h = handlers;
-    this.ws = null;
+    this.transport = null;
     this.id = 0;
     this.cls = 'warrior';
     this.code = '';
@@ -50,28 +50,28 @@ export class Net {
     this.haveFloor = false;
   }
 
-  connect() {
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    this.ws = new WebSocket(`${proto}://${location.host}`);
-    this.ws.onopen = () => {
-      this.connected = true;
-      this.h.onOpen?.();
-      this.pingTimer = setInterval(() => this.send({ t: 'ping', c: Date.now() }), 2000);
-    };
-    this.ws.onclose = () => {
+  /**
+   * Point this client at a transport: an in-page host, a data channel to a
+   * friend's browser, or a WebSocket to a Node server. The protocol above it
+   * is identical in all three cases.
+   */
+  attach(transport) {
+    this.transport = transport;
+    transport.onMessage = (m) => this.handle(m);
+    if ('onClose' in transport) transport.onClose = () => {
       this.connected = false;
       clearInterval(this.pingTimer);
       this.h.onClose?.();
     };
-    this.ws.onerror = () => {};
-    this.ws.onmessage = (ev) => {
-      let m;
-      try { m = JSON.parse(ev.data); } catch { return; }
-      this.handle(m);
-    };
+    this.connected = true;
+    clearInterval(this.pingTimer);
+    if (transport.kind !== 'local') {
+      this.pingTimer = setInterval(() => this.send({ t: 'ping', c: Date.now() }), 2000);
+    }
+    this.h.onOpen?.();
   }
 
-  send(o) { if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(o)); }
+  send(o) { this.transport?.send(o); }
 
   create(name, cls) { this.send({ t: 'create', name, cls }); }
   join(code, name, cls) { this.send({ t: 'join', code, name, cls }); }

@@ -8,9 +8,8 @@ import { join, extname, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { attachWebSocket } from './ws.js';
-import { Game } from './game.js';
-import { TICK_MS, MAX_PLAYERS, IN, CLASSES } from '../shared/constants.js';
-import { MAX_DEPTH } from '../shared/terrain.js';
+import { Session } from '../shared/session.js';
+import { TICK_MS } from '../shared/constants.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const PORT = Number(process.env.PORT || argValue('--port') || 8080);
@@ -86,9 +85,13 @@ const server = createServer((req, res) => {
 
 // ---------------------------------------------------------------------------
 // Parties
+//
+// This process is only one of two ways to host. The browser can run the very
+// same Session over WebRTC, which is how the public build works; this path
+// exists for playing on one network with no broker in the middle.
 // ---------------------------------------------------------------------------
-const games = new Map();
-const clients = new Map();
+const games = new Map();      // code -> Session
+const clients = new Map();    // conn -> { id, code, name }
 let idSeq = 1;
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -104,29 +107,25 @@ function newCode() {
 
 function totalPlayers() {
   let n = 0;
-  for (const g of games.values()) n += g.players.size;
+  for (const s of games.values()) n += s.players.size;
   return n;
 }
 
-function lobbyPayload(game) {
-  return {
-    t: 'lobby',
-    code: game.code,
-    state: game.state,
-    players: [...game.players.values()].map(p => ({
-      id: p.id, name: p.name, cls: p.cls, ready: p.ready,
-    })),
-  };
-}
-
-function broadcast(game, obj) {
-  const str = JSON.stringify(obj);
-  for (const [conn, c] of clients) if (c.code === game.code) conn.send(str);
-}
-
-function connFor(game, playerId) {
-  for (const [conn, c] of clients) if (c.code === game.code && c.id === playerId) return conn;
+function connFor(code, playerId) {
+  for (const [conn, c] of clients) if (c.code === code && c.id === playerId) return conn;
   return null;
+}
+
+function makeSession(code) {
+  const session = new Session(code, {
+    send: (playerId, obj) => connFor(code, playerId)?.sendJson(obj),
+    broadcast: (obj) => {
+      const str = JSON.stringify(obj);
+      for (const [conn, c] of clients) if (c.code === code) conn.send(str);
+    },
+  });
+  games.set(code, session);
+  return session;
 }
 
 attachWebSocket(server, (conn) => {
@@ -137,198 +136,50 @@ attachWebSocket(server, (conn) => {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
     if (!msg || typeof msg.t !== 'string') return;
-    handle(conn, client, msg);
+
+    if (msg.t === 'create' || msg.t === 'join') {
+      const session = msg.t === 'create'
+        ? makeSession(newCode())
+        : games.get(String(msg.code || '').toUpperCase().trim());
+      if (!session) { conn.sendJson({ t: 'error', m: 'NO SUCH PARTY' }); return; }
+      if (session.full()) { conn.sendJson({ t: 'error', m: 'PARTY IS FULL' }); return; }
+      client.code = session.code;
+      const clean = String(msg.name || 'HERO').replace(/[^A-Za-z0-9 ]/g, '').trim().slice(0, 8) || 'HERO';
+      client.name = clean;
+      session.addPlayer(client.id, clean, msg.cls);
+      return;
+    }
+
+    const session = client.code && games.get(client.code);
+    if (session) session.handle(client.id, msg);
   });
 
   conn.on('close', () => {
-    const game = client.code && games.get(client.code);
+    const session = client.code && games.get(client.code);
     clients.delete(conn);
-    if (!game) return;
-    game.removePlayer(client.id);
-    if (game.players.size === 0) games.delete(game.code);
-    else {
-      broadcast(game, lobbyPayload(game));
-      broadcast(game, { t: 'note', m: `${client.name} LEFT THE PARTY` });
-    }
+    if (!session) return;
+    session.removePlayer(client.id);
+    if (session.players.size === 0) games.delete(session.code);
   });
 });
-
-function handle(conn, client, msg) {
-  const game = client.code ? games.get(client.code) : null;
-  const p = game?.players.get(client.id);
-
-  switch (msg.t) {
-    case 'create': {
-      const code = newCode();
-      const g = new Game(code);
-      games.set(code, g);
-      joinGame(conn, client, g, msg.name, msg.cls);
-      break;
-    }
-    case 'join': {
-      const code = String(msg.code || '').toUpperCase().trim();
-      const g = games.get(code);
-      if (!g) { conn.sendJson({ t: 'error', m: 'NO SUCH PARTY' }); return; }
-      if (g.players.size >= MAX_PLAYERS) { conn.sendJson({ t: 'error', m: 'PARTY IS FULL' }); return; }
-      joinGame(conn, client, g, msg.name, msg.cls);
-      break;
-    }
-    case 'class': {
-      if (!game || !p || game.state !== 'lobby') return;
-      const want = String(msg.cls || '');
-      if (!CLASSES[want]) return;
-      const taken = [...game.players.values()].some(o => o.id !== p.id && o.cls === want);
-      if (taken) return;
-      p.cls = want;
-      p.colour = CLASSES[want].colour;
-      p.hp = p.maxHp = CLASSES[want].hp;
-      game.metaDirty = true;
-      broadcast(game, lobbyPayload(game));
-      break;
-    }
-    case 'ready': {
-      if (!game || !p) return;
-      p.ready = !!msg.v;
-      broadcast(game, lobbyPayload(game));
-      const all = [...game.players.values()];
-      if (game.state === 'lobby' && all.length && all.every(x => x.ready)) {
-        game.begin();
-        broadcast(game, { t: 'start' });
-      }
-      break;
-    }
-    case 'in': {
-      if (!game || !p) return;
-      const bits = (msg.b | 0) & (IN.UP | IN.RIGHT | IN.DOWN | IN.LEFT | IN.A | IN.B);
-      p.queue.push({ seq: msg.s | 0, bits });
-      if (p.queue.length > 12) p.queue.splice(0, p.queue.length - 12);
-      game.lastActivity = Date.now();
-      break;
-    }
-    case 'act': if (game && p) game.interact(p); break;
-    case 'use': if (game && p) game.useSlot(p, msg.n | 0); break;
-    case 'inv':
-      if (game && p) game.invOp(p, String(msg.op || ''), msg.a | 0, msg.b | 0);
-      break;
-    case 'perk':
-      if (game && p) game.spendPerk(p, String(msg.id || ''));
-      break;
-    case 'again':
-      if (game && (game.state === 'win' || game.state === 'over')) game.restart();
-      break;
-    case 'ping': conn.sendJson({ t: 'pong', c: msg.c }); break;
-  }
-}
-
-function joinGame(conn, client, game, name, cls) {
-  const clean = String(name || 'HERO').replace(/[^A-Za-z0-9 ]/g, '').trim().slice(0, 8) || 'HERO';
-  const p = game.addPlayer(client.id, clean, cls);
-  if (!p) { conn.sendJson({ t: 'error', m: 'PARTY IS FULL' }); return; }
-  client.code = game.code;
-  client.name = p.name;
-  conn.sendJson({ t: 'welcome', id: client.id, code: game.code, cls: p.cls });
-  broadcast(game, lobbyPayload(game));
-  if (game.state !== 'lobby') conn.sendJson({ t: 'start' });
-}
 
 // ---------------------------------------------------------------------------
 // The clock
 // ---------------------------------------------------------------------------
 let last = Date.now();
-let acc = 0;
-let exploredBeat = 0;
 
 setInterval(() => {
   const now = Date.now();
-  acc += now - last;
+  const dt = now - last;
   last = now;
-  if (acc > 250) acc = 250;
-
-  let steps = 0;
-  while (acc >= TICK_MS && steps < 5) {
-    acc -= TICK_MS;
-    steps++;
-    for (const game of games.values()) {
-      if (game.state === 'play' || game.state === 'over') game.step();
-    }
-  }
-  if (!steps) return;
-  exploredBeat++;
-
-  for (const game of games.values()) {
-    if (game.state === 'lobby') continue;
-
-    if (game.announceStart) {
-      game.announceStart = false;
-      broadcast(game, { t: 'start' });
-    }
-
-    for (const p of game.players.values()) {
-      const conn = connFor(game, p.id);
-      if (!conn) continue;
-      if (p.needFloor) {
-        p.needFloor = false;
-        conn.sendJson(game.floorPacket(p));
-      }
-      conn.sendJson(game.snapshotFor(p));
-    }
-
-    // teammates' exploration bleeds into everyone's map, a couple of times a second
-    if (exploredBeat % 15 === 0) {
-      const depths = new Set([...game.players.values()].map(x => x.depth));
-      for (const d of depths) {
-        const f = game.floors.get(d);
-        if (!f?.mapDirty) continue;
-        f.mapDirty = false;
-        const packet = JSON.stringify(game.exploredPacket(d));
-        for (const o of game.players.values()) {
-          if (o.depth !== d) continue;
-          connFor(game, o.id)?.send(packet);
-        }
-      }
-    }
-
-    if (game.metaDirty) {
-      game.metaDirty = false;
-      broadcast(game, game.metaFor());
-    }
-    for (const b of game.banners) broadcast(game, { t: 'b', ...b });
-    game.banners.length = 0;
-    game.clearTransient();
-
-    if (game.state === 'win' && !game.announcedWin) {
-      game.announcedWin = true;
-      broadcast(game, {
-        t: 'win',
-        stats: {
-          time: Math.round((Date.now() - game.startedAt) / 1000),
-          kills: game.kills, deaths: game.deaths, deepest: MAX_DEPTH,
-          players: [...game.players.values()].map(x => ({
-            name: x.name, cls: x.cls, level: x.level, kills: x.kills, gold: x.gold,
-          })),
-        },
-      });
-    }
-    if (game.state === 'over' && !game.announcedOver) {
-      game.announcedOver = true;
-      broadcast(game, {
-        t: 'over',
-        stats: {
-          time: Math.round((Date.now() - game.startedAt) / 1000),
-          kills: game.kills, deaths: game.deaths, deepest: game.deepest,
-          players: [...game.players.values()].map(x => ({
-            name: x.name, cls: x.cls, level: x.level, kills: x.kills, gold: x.gold,
-          })),
-        },
-      });
-    }
-    if (game.state === 'play') { game.announcedWin = false; game.announcedOver = false; }
-  }
+  for (const session of games.values()) session.advance(dt);
 }, TICK_MS);
 
 setInterval(() => {
-  for (const [code, game] of games) {
-    if (game.players.size === 0 && Date.now() - game.lastActivity > 60_000) games.delete(code);
+  for (const [code, session] of games) {
+    if (session.players.size === 0 && Date.now() - session.game.lastActivity > 60_000) {
+      games.delete(code);
+    }
   }
 }, 30_000);
 

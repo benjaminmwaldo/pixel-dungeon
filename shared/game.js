@@ -7,23 +7,24 @@ import {
   KNOCKBACK_TICKS, KNOCKBACK_SPEED, REVIVE_TICKS, GHOST_TICKS, MAX_PLAYERS,
   XP_PER_LEVEL, HP_PER_LEVEL, HUNGER_MAX, HUNGER_HURT, N, E, S, W, DX, DY,
   isMob, isBoss, rectsOverlap, clamp, dist2,
-} from '../shared/constants.js';
+} from './constants.js';
 import {
   LEVEL_W, LEVEL_LEN, TT, idx, tx, ty, inBounds, passable,
   regionOf, rngFor, MAX_DEPTH, REGIONS,
-} from '../shared/terrain.js';
-import { generate } from '../shared/levelgen.js';
-import { viewFrom, hasLine } from '../shared/fov.js';
+} from './terrain.js';
+import { generate } from './levelgen.js';
+import { viewFrom, hasLine } from './fov.js';
 import {
   MODE, moveActor, boxBlocked, tileUnder, centreTile, tileToPixel, clampToLevel,
-} from '../shared/physics.js';
-import { newPlayerState, playerStep, meleeBox } from '../shared/player.js';
-import { MOBS, SPAWNS, BOSS_OF, mobBudget, scaleFor, HEARING } from '../shared/mobs.js';
+} from './physics.js';
+import { newPlayerState, playerStep, meleeBox } from './player.js';
+import { MOBS, SPAWNS, BOSS_OF, mobBudget, scaleFor, HEARING } from './mobs.js';
 import {
   ITEM, POTION, SCROLL, makeAppearances, rollLoot, rollPrize, rollDrop,
   WEAPONS, ARMORS, isConsumable, stackKey,
-} from '../shared/items.js';
-import { computeStats, canTake, clientMods, PERKS } from '../shared/perks.js';
+} from './items.js';
+import { computeStats, canTake, clientMods, PERKS } from './perks.js';
+import { toBase64 } from './b64.js';
 
 const QUICK_SLOTS = 8;
 const BAG_BASE = 16;
@@ -1248,8 +1249,8 @@ export class Game {
       d: p.depth,
       region: f.level.region,
       boss: !!f.level.boss,
-      tiles: Buffer.from(f.tiles).toString('base64'),
-      explored: Buffer.from(f.explored).toString('base64'),
+      tiles: toBase64(f.tiles),
+      explored: toBase64(f.explored),
       entrance: f.level.entrance,
       exit: f.level.exit,
       rooms: f.level.rooms.map(r => [r.l, r.t, r.r, r.b, r.type === 'tunnel' ? 1 : 0]),
@@ -1328,7 +1329,7 @@ export class Game {
 
   exploredPacket(depth) {
     const f = this.floor(depth);
-    return { t: 'ex', d: depth, explored: Buffer.from(f.explored).toString('base64') };
+    return { t: 'ex', d: depth, explored: toBase64(f.explored) };
   }
 
   clearTransient() {

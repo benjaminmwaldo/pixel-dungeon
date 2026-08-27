@@ -8,6 +8,7 @@ import { TICK_MS, CLASS_ORDER, isBoss } from '../shared/constants.js';
 import { TT, regionOf } from '../shared/terrain.js';
 import { drawInventory, drawPerks, moveNode, firstNode } from './screens.js';
 import { treesFor } from '../shared/perks.js';
+import { Host, joinAsGuest, socketTransport, makeCode, friendlyError } from './peer.js';
 
 const canvas = document.getElementById('screen');
 const renderer = new Renderer(canvas);
@@ -23,7 +24,10 @@ let autoReady = false;
 let myReady = false;
 const particles = [];
 
-const preset = new URLSearchParams(location.search).get('code');
+const params = new URLSearchParams(location.search);
+const preset = params.get('code');
+const LAN = params.get('lan') === '1';    // talk to a Node server instead of a peer
+let host = null;                          // set when this browser is the one hosting
 
 const ui = {
   screen: 'name',
@@ -36,13 +40,7 @@ const ui = {
 };
 
 const net = new Net({
-  onOpen() {
-    if (mode === 'connecting' || mode === 'lost') {
-      mode = 'title';
-      ui.screen = 'name';
-      input.textMode = true;
-    }
-  },
+  onOpen() {},
   onClose() { mode = 'lost'; audio.stopMusic(); },
   onWelcome(m) { ui.code = m.code; ui.error = ''; },
   onLobby(m) {
@@ -76,7 +74,68 @@ const net = new Net({
   },
 });
 
-net.connect();
+mode = 'title';
+ui.screen = 'name';
+input.textMode = true;
+
+// ---------------------------------------------------------------------------
+// Three ways in: host it here, join a friend, or play alone with no network.
+// ---------------------------------------------------------------------------
+async function startHosting({ publish }) {
+  ui.error = '';
+  mode = 'connecting';
+  try {
+    if (LAN) {
+      const t = socketTransport();
+      await t.ready;
+      net.attach(t);
+      net.create(ui.name, CLASS_ORDER[ui.cls]);
+      return;
+    }
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const code = makeCode();
+      const h = new Host(code);
+      try {
+        if (publish) await h.publish();
+      } catch (e) {
+        h.close();
+        if (e?.type === 'unavailable-id') continue;   // someone else has that code
+        throw e;
+      }
+      host = h;
+      h.onError = (m) => { ui.error = m; };
+      net.attach(h.localTransport());
+      h.session.addPlayer(h.localId, ui.name, CLASS_ORDER[ui.cls]);
+      return;
+    }
+    throw new Error('COULD NOT CLAIM A CODE');
+  } catch (e) {
+    ui.error = friendlyError(e);
+    mode = 'title';
+    ui.screen = 'menu';
+  }
+}
+
+async function startJoining(code) {
+  ui.error = '';
+  mode = 'connecting';
+  try {
+    if (LAN) {
+      const t = socketTransport();
+      await t.ready;
+      net.attach(t);
+      net.join(code, ui.name, CLASS_ORDER[ui.cls]);
+      return;
+    }
+    const t = await joinAsGuest(code, ui.name, CLASS_ORDER[ui.cls]);
+    net.attach(t);
+  } catch (e) {
+    ui.error = friendlyError(e);
+    mode = 'title';
+    ui.screen = 'code';
+    input.textMode = true;
+  }
+}
 
 // ---------------------------------------------------------------------------
 input.on((ev) => {
@@ -110,7 +169,7 @@ function titleKeys(ev) {
     else if (ev.type === 'start') {
       localStorage.setItem('pd.cls', CLASS_ORDER[ui.cls]);
       audio.sfx('select');
-      if (ui.code.length === 4) { net.join(ui.code, ui.name, CLASS_ORDER[ui.cls]); return; }
+      if (ui.code.length === 4) { startJoining(ui.code); return; }
       ui.screen = 'menu';
     }
     return;
@@ -120,10 +179,9 @@ function titleKeys(ev) {
     else if (ev.type === 'down') { ui.sel = (ui.sel + 1) % 3; audio.sfx('menu'); }
     else if (ev.type === 'start') {
       audio.sfx('select');
-      const cls = CLASS_ORDER[ui.cls];
-      if (ui.sel === 0) net.create(ui.name, cls);
+      if (ui.sel === 0) startHosting({ publish: true });
       else if (ui.sel === 1) { ui.screen = 'code'; ui.code = ''; input.textMode = true; }
-      else { autoReady = true; net.create(ui.name, cls); }
+      else { autoReady = true; startHosting({ publish: false }); }
     }
     return;
   }
@@ -133,7 +191,8 @@ function titleKeys(ev) {
     else if (ev.type === 'cancel') { ui.screen = 'menu'; input.textMode = false; }
     else if (ev.type === 'start' && ui.code.length === 4) {
       audio.sfx('select');
-      net.join(ui.code, ui.name, CLASS_ORDER[ui.cls]);
+      input.textMode = false;
+      startJoining(ui.code);
     }
   }
 }
@@ -270,7 +329,7 @@ function draw(now) {
   }
 
   switch (mode) {
-    case 'connecting': renderer.drawConnecting('OPENING THE DUNGEON...'); break;
+    case 'connecting': renderer.drawConnecting(LAN ? 'REACHING THE SERVER...' : 'OPENING A DOOR...'); break;
     case 'lost': renderer.drawConnecting('CONNECTION LOST - RELOAD'); break;
     case 'title': renderer.drawTitle(ui); break;
     case 'lobby': renderer.drawLobby(ui); break;
@@ -320,6 +379,7 @@ window.PD = {
   frame: () => draw(performance.now()),
   hold: (bits, n = 1) => { for (let i = 0; i < n; i++) if (mode === 'play') net.tick(bits); },
   key: (code) => window.dispatchEvent(new KeyboardEvent('keydown', { code, bubbles: true })),
+  get host() { return host; },
   get panel() { return panel; },
   set panel(v) { panel = v; },
   invUi, perkUi,

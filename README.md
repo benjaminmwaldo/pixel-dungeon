@@ -18,20 +18,35 @@ The same tileset, re-baked in each chapter's palette:
 
 ## Play
 
+**In a browser: <https://benjaminmwaldo.github.io/pixel-dungeon/>**
+
+Pick a hero, then **HOST A PARTY** and share the four-letter code, or **JOIN
+WITH A CODE**. **DELVE ALONE** needs no network at all — the whole dungeon runs
+in your own tab.
+
+### How multiplayer works without a server
+
+One player's browser runs the authoritative simulation and the others connect
+straight to it over a WebRTC data channel. A public PeerJS broker does nothing
+but the introduction; once you are connected, the traffic goes browser to
+browser. That is why the whole game can live on a static host.
+
+The free broker uses STUN and no TURN relay, so a strict corporate, school or
+symmetric-NAT network may refuse to make the connection. Home wifi and phone
+hotspots are the target.
+
+### On one network, with no broker at all
+
+The same simulation also runs under Node, which is nicer on a LAN because
+nothing leaves the building:
+
 ```bash
 node server/index.js
 ```
 
-Then open <http://localhost:8080>. The server prints a second address on your
-local network — anyone on the same wifi opens that, picks **JOIN WITH A CODE**,
-and types the four letters the host is shown.
-
-To play with someone further away, put a tunnel in front of it
-(`cloudflared tunnel --url http://localhost:8080`, ngrok, or Tailscale). A
-static host like GitHub Pages will not work — the game needs the authoritative
-server process.
-
-Use a different port with `node server/index.js --port 9000`.
+Open <http://localhost:8080/?lan=1> — the server prints a second address for
+everyone else on the wifi. The `?lan=1` is what tells the client to use the
+server instead of a peer. Change the port with `--port 9000`.
 
 ## Controls
 
@@ -109,12 +124,18 @@ standing with them. If everyone falls, the run is over.
 ## How it fits together
 
 ```
-shared/     code both sides run — terrain, level generation, field of view,
-            physics, player motion, the bestiary and the loot tables
-server/     ws.js (RFC 6455 from scratch), game.js (the authority), index.js
-client/     render.js, net.js, input.js, audio.js, main.js
+shared/     everything that decides an outcome — game.js (the authority),
+            session.js (the message pump), terrain, level generation, field of
+            view, physics, player motion, the bestiary, loot and perk trees
+client/     render.js, screens.js, net.js, peer.js, input.js, audio.js, main.js
 client/art/ every sprite, tile and glyph, authored as text
+server/     ws.js (RFC 6455 from scratch) and index.js — the optional LAN host
 ```
+
+`Session` is handed a `send(playerId, obj)` and a `broadcast(obj)` and has no
+idea whether those go down a WebSocket or a data channel. The Node server and
+the browser host drive the same class, so there is one implementation of the
+game and two ways to reach it.
 
 The server simulates at a fixed 30 Hz and is the only thing that decides
 anything. Clients send an input frame every tick and the server queues them, so
@@ -147,7 +168,13 @@ node scripts/levelgen-test.js 40 # 1000 floors: stairs reachable, nothing strand
 node scripts/smoke.js            # gameplay against the real simulation
 node scripts/net-test.js 8080    # two live clients (server must be running)
 node scripts/show-floor.js 13 3  # print any floor as ASCII
+node scripts/build-pages.js      # assemble the static site into dist/
 ```
+
+Every push to `main` runs the art, level and gameplay checks and, if they pass,
+publishes `dist/` to GitHub Pages. There is no bundler and no build config to
+get wrong — every path in the page is relative, so the same files work at the
+root or under `/pixel-dungeon/`.
 
 `scripts/gen-bosses.js` builds the five 32x32 bosses from shape primitives, so
 their rows cannot drift out of alignment; edit that script rather than the

@@ -1,6 +1,6 @@
 // Headless checks against the real simulation: does a party spawn, fight,
 // loot, descend, and can a boss floor be finished?
-import { Game } from '../server/game.js';
+import { Game } from '../shared/game.js';
 import { IN, KIND, CLASSES, isMob, isBoss } from '../shared/constants.js';
 import { TT, MAX_DEPTH, regionOf, LEVEL_LEN } from '../shared/terrain.js';
 import { tileToPixel, tileUnder } from '../shared/physics.js';
