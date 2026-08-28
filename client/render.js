@@ -14,6 +14,7 @@ import { ITEM, POTION_TINT } from '../shared/items.js';
 import { RING_TINT } from '../shared/rings.js';
 import { WAND_TINT } from '../shared/wands.js';
 import { MOBS } from '../shared/mobs.js';
+import { CHAMPIONS, champById } from '../shared/champions.js';
 import { BUFFS } from '../shared/buffs.js';
 import { TRAPS, trapById } from '../shared/traps.js';
 import {
@@ -240,7 +241,9 @@ export class Renderer {
       const maddened = e.flags & (8 << 5);
       const warded = e.flags & (16 << 5);
       const asleep = e.flags & (32 << 5);
+      const champ = CHAMPIONS[champById((e.flags >> 12) & 15)];
       if (flash) img = silhouette(img, '#FCFCFC');
+      else if (champ && ((f >> 2) & 1) === 0) img = silhouette(img, champ.colour);
       else if (burning && ((f >> 1) & 1)) img = silhouette(img, '#F86018');
       else if ((frozen || held) && ((f >> 2) & 1)) img = silhouette(img, '#9CE0FC');
       else if (poisoned && ((f >> 3) & 3) === 0) img = silhouette(img, '#58C038');
@@ -249,6 +252,13 @@ export class Renderer {
       else if (e.flags & 16) img = silhouette(img, '#F87038');
       blit(g, img, e.x, e.y);
       if (asleep && ((f >> 4) & 1)) text(g, 'Z', e.x + 12, e.y - 6, 'blue', 6);
+      if (champ) {
+        // a champion wears a ring of its own colour so you can read it at a glance
+        g.strokeStyle = champ.colour;
+        g.globalAlpha = 0.35 + 0.25 * Math.sin(f * 0.15);
+        g.strokeRect(e.x + 0.5, e.y + 0.5, 15, 15);
+        g.globalAlpha = 1;
+      }
       if (big) this.boss = e;
       else if (e.hp < e.maxHp) this.mobBar(e);
       return;

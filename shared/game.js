@@ -30,6 +30,7 @@ import {
   ARTIFACTS, ART, ART_IDS, artMax, makeArtifact, rollArtifact,
   feed, tickArtifact, MAX_ART_LEVEL,
 } from './artifacts.js';
+import { CHAMPIONS, CHAMP, champChance, rollChampion, champIndex } from './champions.js';
 import { RINGS, applyRings, RING_LEARN_TICKS } from './rings.js';
 import { computeStats, canTake, clientMods, PERKS } from './perks.js';
 import { toBase64 } from './b64.js';
@@ -2221,7 +2222,7 @@ export class Game {
     }
   }
 
-  spawnMob(f, kind, x, y) {
+  spawnMob(f, kind, x, y, { champion = null } = {}) {
     const st = MOBS[kind];
     const scale = scaleFor(f.depth, regionOf(f.depth));
     const e = {
@@ -2233,6 +2234,12 @@ export class Game {
       cd: 30 + f.rng.int(60), phase: f.rng.int(60),
       vx: 0, vy: 0, knockT: 0, knockX: 0, knockY: 0,
     };
+    // now and then the dungeon promotes one
+    if (!isBoss(kind) && !isNpc(kind) && !st.harmless) {
+      const id = champion ??
+        (f.rng.next() < champChance(f.depth) ? rollChampion(f.depth, f.rng) : null);
+      if (id) this.promote(e, id);
+    }
     f.ents.push(e);
     return e;
   }
@@ -2248,6 +2255,21 @@ export class Game {
       box: { x: 2, y: 2, w: 12, h: 12 }, t: 0, item,
     };
     f.ents.push(e);
+    return e;
+  }
+
+  /** Bolt a modifier onto an ordinary monster. */
+  promote(e, id) {
+    const c = CHAMPIONS[id];
+    if (!c) return e;
+    e.champ = id;
+    e.maxHp = Math.round(e.maxHp * c.hp);
+    e.hp = e.maxHp;
+    e.dmg = Math.round(e.dmg * c.dmg);
+    e.dmgBase = e.dmg;          // a growing one compounds from here, not from
+    e.hpBase = e.maxHp;         // the rounded figure, or it never moves at all
+    e.champSpeed = c.speed;
+    e.grown = 0;
     return e;
   }
 
@@ -2293,13 +2315,26 @@ export class Game {
       if (e.effects?.frozen || e.effects?.ai === 'flee') continue;
       const st = MOBS[e.kind];
       if (st.harmless) continue;
+      const reach = CHAMPIONS[e.champ]?.reach ?? 1;
+      const grow = (reach - 1) * 8;
       for (const p of players) {
         if (p.invis > 0 && !isBoss(e.kind)) continue;
         if (e.hitCd > 0) break;
         if (!rectsOverlap(p.x + PLAYER_BOX.x, p.y + PLAYER_BOX.y, PLAYER_BOX.w, PLAYER_BOX.h,
-                          e.x + e.box.x, e.y + e.box.y, e.box.w, e.box.h)) continue;
+                          e.x + e.box.x - grow, e.y + e.box.y - grow,
+                          e.box.w + grow * 2, e.box.h + grow * 2)) continue;
         e.hitCd = 32;
         this.hurtPlayer(p, Math.round(e.dmg * (e.effects?.dealt ?? 1)), e.x + 8, e.y + 8, e);
+        const champ = e.champ ? CHAMPIONS[e.champ] : null;
+        if (champ?.burns) this.afflict(p, B.BURNING, champ.burns, 1, f);
+        if (champ?.blinds) this.afflict(p, B.BLINDNESS, champ.blinds, 1, f);
+        if (champ?.knock) {
+          const dx = p.x - e.x, dy = p.y - e.y;
+          const d = Math.max(1, Math.hypot(dx, dy));
+          p.knockX = (dx / d) * champ.knock;
+          p.knockY = (dy / d) * champ.knock;
+          p.knockT = KNOCKBACK_TICKS;
+        }
         if (st.drains) e.hp = Math.min(e.maxHp, e.hp + 3);
         if (st.ai === 'thief' && p.gold > 0) {
           const stolen = Math.min(p.gold, 25 + f.depth * 3);
@@ -2383,7 +2418,27 @@ export class Game {
     if (st.ai === 'boss') return this.stepBoss(e, f, st, target);
 
     const mode = (st.ai === 'flyer' || st.phasing) ? MODE.FLY : MODE.WALK;
-    const speed = st.speed * (e.enraged ? 1.4 : 1) * (e.effects?.move ?? 1);
+    const champ = e.champ ? CHAMPIONS[e.champ] : null;
+    let speed = st.speed * (e.enraged ? 1.4 : 1) * (e.effects?.move ?? 1)
+              * (champ?.speed ?? 1);
+
+    if (champ) {
+      // a growing one is worse every second you leave it standing
+      if (champ.grows && e.alerted > 0 && e.grown < 1.5) {
+        e.grown = (e.grown || 0) + champ.grows;
+        e.dmg = Math.max(1, Math.round((e.dmgBase ?? e.dmg) * (1 + e.grown)));
+        const want = Math.round((e.hpBase ?? e.maxHp) * (1 + e.grown * 0.5));
+        if (want > e.maxHp) { e.hp += want - e.maxHp; e.maxHp = want; }
+      }
+      // a haloed one knits its neighbours back together
+      if (champ.mends && (this.tick % champ.mends) === 0) {
+        for (const o of f.ents) {
+          if (o === e || o.dead || !isMob(o.kind)) continue;
+          if (dist2(o.x, o.y, e.x, e.y) > 44 * 44) continue;
+          o.hp = Math.min(o.maxHp, o.hp + 1 + Math.floor(f.depth / 5));
+        }
+      }
+    }
 
     const mind = e.effects?.ai;
     if (mind === 'flee' && target) { this.stepAway(e, f, target, speed * 1.2, mode); return; }
@@ -2625,6 +2680,12 @@ export class Game {
   hurtMob(e, dmg, fromDir, f, byPlayer, overTime = false) {
     if (e.flash > 3 && !overTime) return;
     const st = MOBS[e.kind];
+    const champ = e.champ ? CHAMPIONS[e.champ] : null;
+    if (champ?.evade && !overTime && Math.random() < champ.evade) {
+      this.fx(f, 'clang', e.x + 8, e.y + 8);
+      e.flash = 4;
+      return;
+    }
     if (st.npc) {
       // rob a shopkeeper and he leaves, taking the shelves with him
       e.dead = true;
@@ -2635,7 +2696,8 @@ export class Game {
       return;
     }
     const scaled = dmg * (e.effects?.taken ?? 1);
-    const taken = Math.max(1, Math.round(scaled - (overTime ? 0 : (st.armour || 0))));
+    const armour = (st.armour || 0) + (overTime ? 0 : (champ?.armour || 0));
+    const taken = Math.max(1, Math.round(scaled - (overTime ? 0 : armour)));
     e.hp -= taken;
     if (!overTime) e.flash = 6;
     e.alerted = 480;
@@ -2696,6 +2758,19 @@ export class Game {
     }
 
     const at = tileUnder(e, e.box);
+    const champ = e.champ ? CHAMPIONS[e.champ] : null;
+    if (champ?.pyre) {
+      this.fx(f, 'blast', e.x + 8, e.y + 8);
+      this.burst(f, e.x + 8, e.y + 8, 42, Math.round(6 + f.depth), null);
+      for (const p of this.livingOn(f.depth)) {
+        if (dist2(p.x + 8, p.y + 8, e.x + 8, e.y + 8) > 42 * 42) continue;
+        this.afflict(p, B.BURNING, champ.pyre, 1, f);
+      }
+    }
+    if (champ) {
+      // a champion is worth the trouble it gave you
+      e.loot = Math.round((e.loot || 0) + 12 + f.depth * 4);
+    }
     if (e.hoard) this.dropItem(f, at, e.hoard);
     if (e.loot) this.dropItem(f, at, { type: ITEM.GOLD, amount: e.loot });
     const drop = rollDrop(f.depth, f.rng);
@@ -2791,6 +2866,10 @@ export class Game {
 
   snapshotFor(p) {
     const f = this.floor(p.depth);
+    // A non-finite coordinate JSON-encodes as null, and an entity at null is
+    // drawn nowhere at all with nothing said about it. Round through this so a
+    // bug upstream shows as a thing standing in the corner, not a thing gone.
+    const at = (v) => (Number.isFinite(v) ? Math.round(v) : 0);
     const ents = [];
     const items = [];
     const sense = p.stats.senseMobs * TILE;
@@ -2801,7 +2880,7 @@ export class Game {
       if (!p.fov[t] && !(sense && isMob(e.kind) && dist2(p.x, p.y, e.x, e.y) < sense * sense)) continue;
       if (e.kind === KIND.ITEM) {
         const it = e.item;
-        items.push([e.id, Math.round(e.x), Math.round(e.y), it.type,
+        items.push([e.id, at(e.x), at(e.y), it.type,
                     it.kind || '', it.tier || 0, it.upgrade || 0, it.amount || 0,
                     e.price || 0]);
       } else {
@@ -2812,7 +2891,8 @@ export class Game {
         if (e.mouth > 0) flags |= 8;
         if (e.enraged) flags |= 16;
         flags |= BF.buffFlags(e) << 5;
-        ents.push([e.id, e.kind, Math.round(e.x), Math.round(e.y), e.dir | 0, flags,
+        flags |= champIndex(e.champ) << 12;
+        ents.push([e.id, e.kind, at(e.x), at(e.y), e.dir | 0, flags,
                    e.hp | 0, e.maxHp | 0]);
       }
     }
@@ -2821,7 +2901,7 @@ export class Game {
     for (const o of this.players.values()) {
       if (o.id === p.id || o.depth !== p.depth) continue;
       if (!p.fov[tileUnder(o, PLAYER_BOX)]) continue;
-      others.push([o.id, Math.round(o.x), Math.round(o.y), o.dir,
+      others.push([o.id, at(o.x), at(o.y), o.dir,
                    CLASS_ORDER.indexOf(o.cls), o.ghost ? 1 : 0, o.atk,
                    o.hp, o.maxHp, o.walk, o.invis > 0 ? 1 : 0]);
     }
@@ -2833,7 +2913,7 @@ export class Game {
 
     return {
       t: 's', k: this.tick, a: p.seq, d: p.depth,
-      me: [Math.round(p.x), Math.round(p.y), p.dir, p.atk, p.hp, p.maxHp,
+      me: [at(p.x), at(p.y), p.dir, p.atk, p.hp, p.maxHp,
            p.level, p.xp, XP_PER_LEVEL(p.level), p.ghost ? 1 : 0, p.invuln,
            p.abilityCd, p.knockT, Math.round(p.knockX), Math.round(p.knockY),
            p.stun, p.gold, Math.round(p.hunger), p.invis, p.reviveT | 0,

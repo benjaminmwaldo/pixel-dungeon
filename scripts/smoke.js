@@ -253,5 +253,26 @@ check('standing on them brings them back', !b.ghost, `hp=${b.hp}`);
   check('heroes come back on their feet', !a.ghost && a.depth === 1 && a.hp > 0);
 }
 
+// --- nothing on the wire is ever at nowhere ---------------------------------
+// A non-finite coordinate encodes as null and the client then draws the thing
+// nowhere, silently. Cheap to check, and impossible to notice by eye.
+{
+  steady();
+  let bad = 0;
+  for (let i = 0; i < 400; i++) {
+    g.step();
+    const snap = g.snapshotFor(a);
+    const coords = [
+      ...snap.e.flatMap(e => [e[2], e[3]]),
+      ...snap.it.flatMap(e => [e[1], e[2]]),
+      ...snap.o.flatMap(e => [e[1], e[2]]),
+      snap.me[0], snap.me[1],
+    ];
+    if (coords.some(v => !Number.isFinite(v))) bad++;
+    g.clearTransient();
+  }
+  check('every position on the wire is a real number', bad === 0, `${bad} bad frames`);
+}
+
 console.log(fails ? `\n${fails} FAILURES` : '\nall checks passed');
 process.exit(fails ? 1 : 0);

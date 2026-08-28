@@ -235,7 +235,7 @@ export class Net {
     this.refreshFov();
   }
 
-  view(now) {
+  view(now = performance.now()) {
     this.err.x *= 0.72;
     this.err.y *= 0.72;
     if (Math.abs(this.err.x) < 0.2) this.err.x = 0;
@@ -249,8 +249,13 @@ export class Net {
     if (!a) { a = this.buffer[0]; b = this.buffer[1] || null; }
     if (!a) return { ents: [], items: [], others: [] };
 
+    // Math.max(0, NaN) is NaN, so a bad clock would quietly put every entity
+    // at nowhere rather than throwing. Clamp explicitly.
     let alpha = 0;
-    if (b && b.time > a.time) alpha = Math.min(1, Math.max(0, (target - a.time) / (b.time - a.time)));
+    if (b && b.time > a.time) {
+      const t = (target - a.time) / (b.time - a.time);
+      alpha = Number.isFinite(t) ? Math.min(1, Math.max(0, t)) : 0;
+    }
     const list = b || a;
 
     const lerpAll = (cur, prevList) => {
@@ -267,7 +272,7 @@ export class Net {
     return { ents: lerpAll(list.ents, a.ents), items: list.items, others };
   }
 
-  state(now) {
+  state(now = performance.now()) {
     const { ents, items, others } = this.view(now);
     const me = this.local;
     return {
