@@ -255,6 +255,10 @@ export class Renderer {
     const shot = SHOT_SPRITE[e.kind];
     if (shot) { blit(g, IMG[shot], e.x, e.y); return; }
 
+    if (e.kind === KIND.THROWN) {
+      blit(g, IMG.THROWN, e.x, e.y);
+      return;
+    }
     if (e.kind === KIND.WARD) {
       blit(g, ((f >> 3) & 1) ? IMG.WARD2 : IMG.WARD1, e.x - 4, e.y - 4);
       return;
@@ -321,6 +325,7 @@ export class Renderer {
         const look = st.app?.wandLook?.[e.kind];
         return wandImg(WAND_TINT[look] || '#FCFCFC');
       }
+      case ITEM.MISSILE: return IMG.MISSILE;
       default: return null;
     }
   }

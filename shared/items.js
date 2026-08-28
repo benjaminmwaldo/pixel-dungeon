@@ -6,11 +6,12 @@ import { rngFor } from './terrain.js';
 import { dressGear, markName } from './enchants.js';
 import { RINGS, RING_IDS, RING_LOOKS, rollRing } from './rings.js';
 import { WANDS, WAND_IDS, WAND_LOOKS, rollWand } from './wands.js';
+import { MISSILES, rollMissile } from './missiles.js';
 
 export const ITEM = {
   GOLD: 'gold', FOOD: 'food', POTION: 'potion', SCROLL: 'scroll',
   WEAPON: 'weapon', ARMOR: 'armor', KEY: 'key', GOLDKEY: 'goldkey',
-  BOMB: 'bomb', RELIC: 'relic', RING: 'ring', WAND: 'wand',
+  BOMB: 'bomb', RELIC: 'relic', RING: 'ring', WAND: 'wand', MISSILE: 'missile',
 };
 
 // The twelve the original carries.
@@ -98,6 +99,11 @@ export function itemLabel(item, app, known) {
       return known.scrolls.includes(item.kind)
         ? `SCROLL OF ${item.kind.toUpperCase()}`
         : `SCROLL "${app.scrollLook[item.kind]}"`;
+    case ITEM.MISSILE: {
+      const def = MISSILES[item.kind];
+      const n = item.amount || 1;
+      return n > 1 ? `${n} ${def.name}S` : def.name;
+    }
     case ITEM.WAND: {
       const plus = item.upgrade ? `+${item.upgrade} ` : '';
       if (!item.known && !known.wands?.includes(item.kind)) {
@@ -128,7 +134,8 @@ function gearName(item, base) {
 export function isConsumable(item) {
   return item.type === ITEM.POTION || item.type === ITEM.SCROLL ||
          item.type === ITEM.FOOD || item.type === ITEM.BOMB ||
-         item.type === ITEM.KEY || item.type === ITEM.GOLDKEY;
+         item.type === ITEM.KEY || item.type === ITEM.GOLDKEY ||
+         item.type === ITEM.MISSILE;
 }
 
 /** Kept in the quick bar and pointed, but never used up. */
@@ -145,6 +152,7 @@ export function isWorn(item) {
 /** A stack key, so five rations occupy one slot. */
 export function stackKey(item) {
   if (item.type === ITEM.POTION || item.type === ITEM.SCROLL) return `${item.type}:${item.kind}`;
+  if (item.type === ITEM.MISSILE) return `missile:${item.kind}`;
   if (item.type === ITEM.RING) return `ring:${item.kind}:${item.upgrade || 0}`;
   if (item.type === ITEM.WAND) return `wand:${item.kind}:${item.upgrade || 0}:${item.serial || 0}`;
   return item.type;
@@ -170,12 +178,13 @@ export function rollLoot(depth, rng, { rich = false } = {}) {
   if (!rich && r < 0.30) return { type: ITEM.GOLD, amount: rng.range(5, 15 + depth * 4) };
   if (!rich && r < 0.42) return { type: ITEM.FOOD };
   if (r < 0.60) return { type: ITEM.POTION, kind: rng.pick(COMMON_POTIONS) };
-  if (r < 0.76) return { type: ITEM.SCROLL, kind: rng.pick(COMMON_SCROLLS) };
-  if (r < 0.81) return { type: ITEM.BOMB, amount: rng.range(1, 3) };
-  if (r < 0.83) return rollRing(depth, rng);
-  if (r < 0.86) return rollWand(depth, rng);
+  if (r < 0.74) return { type: ITEM.SCROLL, kind: rng.pick(COMMON_SCROLLS) };
+  if (r < 0.78) return { type: ITEM.BOMB, amount: rng.range(1, 3) };
+  if (r < 0.84) return rollMissile(depth, rng);
+  if (r < 0.87) return rollRing(depth, rng);
+  if (r < 0.90) return rollWand(depth, rng);
   const tier = clampTier(Math.ceil(depth / 5) + (rng.chance(0.25) ? 1 : 0));
-  if (r < 0.92) {
+  if (r < 0.95) {
     return dressGear({ type: ITEM.WEAPON, tier, upgrade: rng.chance(0.25) ? 1 : 0 }, depth, rng);
   }
   return dressGear({ type: ITEM.ARMOR, tier, upgrade: rng.chance(0.25) ? 1 : 0 }, depth, rng);
@@ -226,6 +235,7 @@ export function itemValue(item) {
     case ITEM.KEY: case ITEM.GOLDKEY: return 0;
     case ITEM.POTION: return item.kind === POTION.STRENGTH ? 300 : 45;
     case ITEM.SCROLL: return item.kind === SCROLL.UPGRADE ? 300 : 45;
+    case ITEM.MISSILE: return (MISSILES[item.kind]?.dmg || 3) * 5 * (item.amount || 1);
     case ITEM.RING: return 200 + (item.upgrade || 0) * 60;
     case ITEM.WAND: return 220 + (item.upgrade || 0) * 70;
     case ITEM.WEAPON:

@@ -7,6 +7,7 @@ import { ITEM, POTION_TINT, WEAPONS, ARMORS, itemLabel, isConsumable } from '../
 import { ENCHANTS, GLYPHS, CURSES } from '../shared/enchants.js';
 import { RINGS, RING_TINT } from '../shared/rings.js';
 import { WANDS, WAND_TINT } from '../shared/wands.js';
+import { MISSILES, missilePower } from '../shared/missiles.js';
 import { TREES, PERKS, perksInTree, treesFor, canTake } from '../shared/perks.js';
 import { IMG, blit, text, textCentered, textWidth, potionImg, ringImg, wandImg } from './art/bake.js';
 
@@ -45,6 +46,7 @@ export function iconFor(item, st) {
       return ringImg(RING_TINT[st.app?.ringLook?.[item.kind]] || '#FCFCFC');
     case ITEM.WAND:
       return wandImg(WAND_TINT[st.app?.wandLook?.[item.kind]] || '#FCFCFC');
+    case ITEM.MISSILE: return IMG.MISSILE;
     default: return null;
   }
 }
@@ -109,6 +111,10 @@ function describe(item, st, short = false) {
     case ITEM.SCROLL:
       return st.known?.scrolls?.includes(item.kind)
         ? scrollText(item.kind) : 'THE RUNE MEANS NOTHING TO YOU YET';
+    case ITEM.MISSILE: {
+      const def = MISSILES[item.kind];
+      return def ? `${missilePower(def, st.depth || 1, 0)} DAMAGE  -  ${def.blurb}` : '';
+    }
     case ITEM.WAND: {
       const def = WANDS[item.kind];
       const max = (def?.max || 0) + (item.upgrade || 0);
@@ -236,6 +242,7 @@ function actionHint(item, ui) {
   if (ui.held !== null) return 'C AGAIN TO PLACE IT';
   if (item.type === ITEM.WEAPON || item.type === ITEM.ARMOR) return 'ENTER TO WEAR IT';
   if (item.type === ITEM.KEY || item.type === ITEM.GOLDKEY) return 'USED BY WALKING INTO A LOCKED DOOR';
+  if (item.type === ITEM.MISSILE) return 'ENTER TO THROW ONE WHERE YOU FACE';
   if (item.type === ITEM.WAND) {
     return (item.charges ?? 0) > 0 ? 'ENTER TO POINT IT WHERE YOU FACE' : 'SPENT - IT WILL FILL BACK UP';
   }
