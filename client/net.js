@@ -305,6 +305,12 @@ export class Net {
     if (!this.haveFloor) return -1;
     return this.tiles[tileUnder(this.local, PLAYER_BOX)];
   }
+
+  /** Which tile the hero is standing on, or null before the floor arrives. */
+  tileIndex() {
+    if (!this.haveFloor) return null;
+    return tileUnder(this.local, PLAYER_BOX);
+  }
 }
 
 function clampErr(v) { return Math.max(-24, Math.min(24, v)); }

@@ -141,6 +141,7 @@ export class Renderer {
         if (!visible && !seen[i]) continue;
         let t = tiles[i];
         if (t === TT.TRAP_HIDDEN) t = TT.FLOOR;
+        if (t === TT.SECRET_DOOR) t = TT.WALL;   // it is a wall until it isn't
         const img = t === TT.WATER ? (visible ? water : waterDim)
                                    : (visible ? lit[t] : remembered[t]);
         if (img) g.drawImage(img, x * TILE, y * TILE);

@@ -93,6 +93,11 @@ check('and the gold actually leaves your purse', p.gold === 50, `${p.gold} left`
 // --- walking over stock is not shoplifting ----------------------------------
 const other = f.ents.find(e => e.kind === KIND.ITEM && e.price && !e.dead);
 p.x = other.x; p.y = other.y;
+// clear any free loot lying on the same spot, or we would be testing that
+for (const e of f.ents) {
+  if (e === other || e.kind !== KIND.ITEM || e.price) continue;
+  if (Math.abs(e.x - other.x) < 14 && Math.abs(e.y - other.y) < 14) e.dead = true;
+}
 p.gold = 0;
 g.pickups(p, f);
 check('walking over the stock does not take it', !other.dead && p.gold === 0);

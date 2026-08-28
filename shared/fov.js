@@ -70,12 +70,16 @@ function cast(tiles, out, cx, cy, row, start, end, radius, xx, xy, yx, yy) {
  * tiles and the wall ring around them are revealed, so a corridor "room" does
  * not give away the map.
  */
-export function lightRoom(level, cx, cy, out) {
+export function lightRoom(level, cx, cy, out, radius = Infinity) {
   const room = roomAt(level, cx, cy);
   if (!room || room.type === 'tunnel') return;
+  // A lit room shows you all of itself, but never further than you can see —
+  // otherwise blindness and a dark floor would mean nothing indoors.
+  const reach = radius + 1;
   for (let y = room.t; y <= room.b; y++) {
     for (let x = room.l; x <= room.r; x++) {
       if (!inBounds(x, y)) continue;
+      if (Math.abs(x - cx) > reach || Math.abs(y - cy) > reach) continue;
       const i = idx(x, y);
       // interiors always; the surrounding wall only so the room reads as closed
       if (x > room.l && x < room.r && y > room.t && y < room.b) out[i] = 1;
@@ -95,7 +99,7 @@ export function roomAt(level, x, y) {
 export function viewFrom(level, tile, radius, out) {
   const x = tx(tile), y = ty(tile);
   computeFov(level.tiles, x, y, radius, out);
-  lightRoom(level, x, y, out);
+  lightRoom(level, x, y, out, radius);
   return out;
 }
 

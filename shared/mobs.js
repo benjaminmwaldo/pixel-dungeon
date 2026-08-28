@@ -54,6 +54,12 @@ export const MOBS = {
     ai: 'idle', box: BIG, harmless: true, npc: true,
   },
 
+  // Not a chest. There are no chests down here.
+  [KIND.MIMIC]: {
+    name: 'MIMIC', sprite: 'MIMIC', hp: 30, dmg: 8, speed: 1.6, xp: 14,
+    ai: 'chase', box: BIG, armour: 2,
+  },
+
   // ---- the five chapter bosses -----------------------------------------
   [KIND.BOSS_GLUT]: {
     name: 'GLUT, THE SWOLLEN', sprite: 'BOSS_GLUT', hp: 90, dmg: 8, speed: 1.1, xp: 60,

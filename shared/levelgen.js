@@ -131,9 +131,15 @@ function regularFloor(depth, rng) {
     vault = deadEnds.pop();
     rooms[vault].type = ROOM.VAULT;
   }
+  // A dead-end special is never on the way to anywhere, so hiding its door
+  // cannot strand the party. Everything else stays plainly visible.
+  const secretable = [];
+
   const nSpecial = Math.min(deadEnds.length, rng.range(1, 2));
   for (let n = 0; n < nSpecial; n++) {
-    rooms[deadEnds.pop()].type = rng.pick(SPECIALS);
+    const n2 = deadEnds.pop();
+    rooms[n2].type = rng.pick(SPECIALS);
+    secretable.push(n2);
   }
   for (const r of rooms) {
     if (r.type === ROOM.TUNNEL && roomW(r) >= 4 && roomH(r) >= 4 && rng.chance(0.55)) {
@@ -208,10 +214,28 @@ function regularFloor(depth, rng) {
     }
   }
 
+  // Hide some of those doors — but never one that would shut the party out of
+  // the stairs or the key.
+  const secrets = [];
+  const holds = (room, i) => i !== null && i !== undefined &&
+    tx(i) >= room.l && tx(i) <= room.r && ty(i) >= room.t && ty(i) <= room.b;
+  for (const n of secretable) {
+    const room = rooms[n];
+    if (holds(room, entIdx) || holds(room, exitIdx) || holds(room, keySpot)) continue;
+    if (!rng.chance(depth < 3 ? 0.3 : 0.55)) continue;
+    for (const d of room.doors || []) {
+      if (tiles[d] === TT.DOOR || tiles[d] === TT.OPEN_DOOR) {
+        tiles[d] = TT.SECRET_DOOR;
+        secrets.push(d);
+      }
+    }
+  }
+
   return finish({
     depth, region: region.key, tiles, rooms,
     entrance: entIdx, exit: exitIdx,
     vaultRoom: vault, keySpot, boss: false, traps, shopRoom: shop,
+    secrets,
   }, rng);
 }
 

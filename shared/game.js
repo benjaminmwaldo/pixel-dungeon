@@ -441,6 +441,8 @@ export class Game {
     }
     // a rogue — or anyone trapwise — reads the floor before standing on it
     const reach = Math.max(p.cls === 'rogue' ? 2 : 0, p.stats.search);
+    // and anyone who stands still long enough finds what is beside them
+    if ((p.still || 0) > 30 && (this.tick & 15) === 0) this.searchAround(p, f, i, 1);
     if (reach > 0) {
       const cx = tx(i), cy = ty(i);
       for (let dy = -reach; dy <= reach; dy++) {
@@ -449,6 +451,26 @@ export class Game {
           if (!inBounds(nx, ny)) continue;
           const j = idx(nx, ny);
           if (f.tiles[j] === TT.TRAP_HIDDEN) f.set(j, TT.TRAP);
+          else if (f.tiles[j] === TT.SECRET_DOOR) {
+            f.set(j, TT.DOOR);
+            this.banner('A DOOR, WHERE THERE WAS A WALL', 1800);
+          }
+        }
+      }
+    }
+  }
+
+  /** Look at the tiles around one spot and reveal what is hiding there. */
+  searchAround(p, f, i, reach) {
+    const cx = tx(i), cy = ty(i);
+    for (let dy = -reach; dy <= reach; dy++) {
+      for (let dx = -reach; dx <= reach; dx++) {
+        const nx = cx + dx, ny = cy + dy;
+        if (!inBounds(nx, ny)) continue;
+        const j = idx(nx, ny);
+        if (f.tiles[j] === TT.SECRET_DOOR) {
+          f.set(j, TT.DOOR);
+          this.banner('A DOOR, WHERE THERE WAS A WALL', 1800);
         }
       }
     }
@@ -543,6 +565,7 @@ export class Game {
       if (e.dead || e.kind !== KIND.ITEM || e.t < 6) continue;
       if (!rectsOverlap(p.x + 2, p.y + 2, 12, 12, e.x + 2, e.y + 2, 12, 12)) continue;
       if (e.price) continue;   // pay for it first
+      if (e.mimic) { this.springMimic(p, f, e); continue; }
       if (this.take(p, f, e.item)) e.dead = true;
     }
   }
@@ -630,6 +653,30 @@ export class Game {
     this.metaDirty = true;
   }
 
+  /** True if one of the four tiles around this one is open air. */
+  chasmBeside(f, i) {
+    const cx = tx(i), cy = ty(i);
+    for (let d = 0; d < 4; d++) {
+      const nx = cx + DX[d], ny = cy + DY[d];
+      if (inBounds(nx, ny) && f.tiles[idx(nx, ny)] === TT.CHASM) return true;
+    }
+    return false;
+  }
+
+  /** Jump in. It is a long way down, but it is a way down. */
+  leap(p, f) {
+    if (p.depth >= MAX_DEPTH) { this.banner('THERE IS NOTHING BELOW', 1400); return; }
+    this.fx(f, 'blast', p.x + 8, p.y + 8);
+    if (p.effects?.fly) {
+      this.banner('YOU DRIFT DOWN THROUGH THE DARK', 1600);
+    } else {
+      this.banner('YOU LEAP INTO THE DARK', 1600);
+      this.hurtPlayer(p, 3 + Math.floor(p.depth / 2), p.x + 8, p.y + 8, null, true);
+      if (p.dead || p.ghost) return;
+    }
+    this.descend(p, true);
+  }
+
   /** Is this tile inside the shop on this floor? */
   inShop(f, tile) {
     const n = f.level.shopRoom;
@@ -651,6 +698,71 @@ export class Game {
     this.fx(f, 'gold', p.x + 8, p.y + 8);
     this.banner(`BOUGHT ${itemLabel(e.item, this.app, this.known)}`, 1500);
     this.metaDirty = true;
+  }
+
+  /**
+   * Every floor has a character, and the party is told which as they arrive.
+   * Each one changes something real, not just the wording of the banner.
+   */
+  rollFeeling(f) {
+    if (f.depth <= 1) return 'none';
+    const r = f.rng.next();
+    if (r < 0.10) return 'dangerous';
+    if (r < 0.20) return 'treasure';
+    if (r < 0.28) return 'trapped';
+    if (r < 0.36) return 'dark';
+    return 'none';
+  }
+
+  /** Say it out loud when somebody first sets foot on the floor. */
+  announceFeeling(f) {
+    switch (f.feeling) {
+      case 'dangerous': this.banner('SOMETHING IS BADLY WRONG DOWN HERE', 2600); break;
+      case 'treasure': this.banner('SOMETHING VALUABLE IS CLOSE BY', 2600); break;
+      case 'trapped': this.banner('THE FLOOR HERE HAS BEEN PREPARED', 2600); break;
+      case 'dark': this.banner('IT IS VERY DARK ON THIS FLOOR', 2600); break;
+      default: break;
+    }
+  }
+
+  /** A trapped floor gets a second helping. */
+  sowTraps(f) {
+    f.level.traps ??= {};
+    const pts = f.level.itemPoints;
+    for (let n = 0; n < 14; n++) {
+      const i = pts[f.rng.int(pts.length)];
+      if (i === undefined || f.tiles[i] !== TT.FLOOR) continue;
+      f.set(i, TT.TRAP_HIDDEN);
+      f.level.traps[i] = rollTrap(f.depth, f.rng);
+    }
+  }
+
+  /**
+   * Some of what is lying about is not lying about. A mimic waits as a piece
+   * of loot until somebody reaches for it.
+   */
+  sowMimics(f) {
+    if (f.depth < 3) return;
+    const loot = f.ents.filter(e => e.kind === KIND.ITEM && !e.price &&
+      e.item.type !== ITEM.KEY && e.item.type !== ITEM.GOLDKEY);
+    const want = f.rng.chance(0.55) ? 1 : 0;
+    for (let n = 0; n < want && loot.length; n++) {
+      const e = loot.splice(f.rng.int(loot.length), 1)[0];
+      e.mimic = true;
+    }
+  }
+
+  /** It stops pretending. */
+  springMimic(p, f, e) {
+    e.dead = true;
+    const st = MOBS[KIND.MIMIC];
+    const m = this.spawnMob(f, KIND.MIMIC, e.x - 4, e.y - 6);
+    if (m) {
+      m.alerted = 900;
+      m.hoard = e.item;                 // it swallowed the thing you wanted
+    }
+    this.fx(f, 'poof', e.x + 8, e.y + 8);
+    this.banner('IT WAS NEVER LOOT', 1800);
   }
 
   /** Fill the special rooms with whatever it is they promise. */
@@ -1098,7 +1210,11 @@ export class Game {
       const item = f.depth >= MAX_DEPTH ? { type: ITEM.RELIC } : rollPrize(f.depth, f.rng);
       f.set(i, TT.FLOOR_DECO);
       if (!this.take(p, f, item)) this.dropItem(f, i, item);
+      return;
     }
+
+    // nothing else here, but there is a hole beside you
+    if (this.chasmBeside(f, i)) this.leap(p, f);
   }
 
   descend(p, forced = false) {
@@ -1146,6 +1262,7 @@ export class Game {
     f.populated = true;
     const region = regionOf(f.depth);
 
+    f.feeling = 'none';
     if (f.level.boss) {
       const kind = BOSS_OF[region.key];
       const at = f.level.arena || { x: 15 * TILE, y: 7 * TILE };
@@ -1154,12 +1271,22 @@ export class Game {
       return;
     }
 
-    for (let n = 0; n < mobBudget(f.depth); n++) this.spawnRandomMob(f);
+    f.feeling = this.rollFeeling(f);
+    f.feelingIn = 100;   // let the floor-name banner land first
 
-    const drops = 5 + f.rng.int(4);
+    const budget = Math.round(mobBudget(f.depth) * (f.feeling === 'dangerous' ? 1.6 : 1));
+    for (let n = 0; n < budget; n++) this.spawnRandomMob(f);
+
+    let drops = 5 + f.rng.int(4);
+    if (f.feeling === 'treasure') drops += 3;
     for (let n = 0; n < drops && n < f.level.itemPoints.length; n++) {
       this.dropItem(f, f.level.itemPoints[n], rollLoot(f.depth, f.rng));
     }
+    if (f.feeling === 'treasure' && f.level.itemPoints.length > drops) {
+      this.dropItem(f, f.level.itemPoints[drops], rollPrize(f.depth, f.rng));
+    }
+    if (f.feeling === 'trapped') this.sowTraps(f);
+    this.sowMimics(f);
     if (f.level.keySpot !== null && f.level.keySpot !== undefined) {
       this.dropItem(f, f.level.keySpot, { type: ITEM.KEY });
     }
@@ -1210,6 +1337,7 @@ export class Game {
 
   stepFloor(f) {
     const players = this.livingOn(f.depth);
+    if (f.feelingIn > 0 && players.length && --f.feelingIn === 0) this.announceFeeling(f);
     if (--f.flowAge <= 0) { this.buildFlow(f, players); f.flowAge = 8; }
 
     for (const e of f.ents) {
@@ -1644,6 +1772,7 @@ export class Game {
     }
 
     const at = tileUnder(e, e.box);
+    if (e.hoard) this.dropItem(f, at, e.hoard);
     if (e.loot) this.dropItem(f, at, { type: ITEM.GOLD, amount: e.loot });
     const drop = rollDrop(f.depth, f.rng);
     if (drop) this.dropItem(f, at, drop);
@@ -1657,7 +1786,9 @@ export class Game {
     const here = tileUnder(p, PLAYER_BOX);
     if (here === p.fovTile) return;
     p.fovTile = here;
-    const sight = Math.max(2, CLASSES[p.cls].sight + p.stats.sight + (p.effects?.sight || 0));
+    const gloom = f.feeling === 'dark' ? 3 : 0;
+    const sight = Math.max(2,
+      CLASSES[p.cls].sight + p.stats.sight + (p.effects?.sight || 0) - gloom);
     viewFrom(f.level, here, sight, p.fov);
     for (let i = 0; i < LEVEL_LEN; i++) {
       if (p.fov[i] && !f.explored[i]) { f.explored[i] = 1; f.mapDirty = true; }

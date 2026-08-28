@@ -6,7 +6,7 @@ import { Net } from './net.js';
 import * as audio from './audio.js';
 import { TICK_MS, CLASS_ORDER, isBoss } from '../shared/constants.js';
 import { itemLabel } from '../shared/items.js';
-import { TT, regionOf } from '../shared/terrain.js';
+import { TT, regionOf, LEVEL_W, LEVEL_H } from '../shared/terrain.js';
 import { drawInventory, drawPerks, moveNode, firstNode } from './screens.js';
 import { treesFor } from '../shared/perks.js';
 import { Host, joinAsGuest, socketTransport, makeCode, friendlyError } from './peer.js';
@@ -371,6 +371,20 @@ function promptForTile(st) {
   else if (t === TT.LOCKED_EXIT) renderer.prompt('SEALED UNTIL THE BOSS FALLS');
   else if (t === TT.WELL) renderer.prompt('E - DRINK');
   else if (t === TT.PEDESTAL) renderer.prompt('E - TAKE IT');
+  else if (chasmBeside()) renderer.prompt('E - LEAP DOWN');
+}
+
+/** Is one of the four tiles around the hero open air? */
+function chasmBeside() {
+  const i = net.tileIndex?.();
+  if (i === null || i === undefined) return false;
+  const x = i % LEVEL_W, y = (i / LEVEL_W) | 0;
+  for (const [dx, dy] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+    const nx = x + dx, ny = y + dy;
+    if (nx < 0 || ny < 0 || nx >= LEVEL_W || ny >= LEVEL_H) continue;
+    if (net.tiles?.[ny * LEVEL_W + nx] === TT.CHASM) return true;
+  }
+  return false;
 }
 
 function updateMusic(st) {

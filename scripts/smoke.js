@@ -30,7 +30,7 @@ check('each hero has their class hit points', a.maxHp === CLASSES[a.cls].hp);
 
 // --- the floor is alive ----------------------------------------------------
 idle(5);
-const f1 = g.floor(1);
+let f1 = g.floor(1);
 check('floor 1 populated itself', f1.ents.length > 0, `${f1.ents.length} entities`);
 check('and it has monsters on it', f1.ents.some(e => isMob(e.kind)));
 const mobsBefore = f1.ents.filter(e => isMob(e.kind)).map(e => `${Math.round(e.x)},${Math.round(e.y)}`).join('|');
@@ -61,8 +61,13 @@ const victim = f1.ents.find(e => isMob(e.kind));
 const spot = { x: victim.x, y: victim.y + 14 };
 a.x = spot.x; a.y = spot.y; a.dir = 0; a.invuln = 9999;
 const xp0 = a.xp, lvl0 = a.level;
+// invuln stops blows, not traps or poison — and this check is about whether a
+// swing kills, not whether the hero survives the walk to the monster
 for (let i = 0; i < 200 && !victim.dead; i++) {
   a.x = victim.x; a.y = victim.y + 13; a.dir = 0; a.invuln = 9999;
+  a.hp = a.maxHp; a.ghost = false; a.buffs = {};
+  // teleporting onto arbitrary tiles can drop the hero through a weak floor
+  a.depth = 1;
   a.queue.push({ seq: ++a.seq, bits: IN.A }); g.step();
   a.queue.push({ seq: ++a.seq, bits: 0 }); g.step();
   g.clearTransient();
@@ -71,6 +76,27 @@ check('a monster can be cut down', victim.dead);
 check('and killing it pays experience', a.xp > xp0 || a.level > lvl0, `xp ${xp0} -> ${a.xp}`);
 
 // --- loot ------------------------------------------------------------------
+// The fight above can leave the hero on the floor — poisoned, burning, or
+// outright dead. None of the checks below are about surviving it, so put the
+// hero back on their feet first, and again before anything that matters.
+// If both heroes go down the run ends, and the simulation then refuses every
+// action — which would look like a dozen unrelated failures below.
+function steady(hp = null) {
+  for (const h of g.players.values()) {
+    h.ghost = false;
+    h.reviveT = 0;
+    h.buffs = {};
+    h.effects = null;
+    h.invuln = 600;
+    h.hp = h.maxHp;
+  }
+  g.state = 'play';
+  g.overTimer = 0;
+  // a wipe rebuilds the dungeon, which leaves the captured floor orphaned
+  f1 = g.floor(a.depth);
+  if (hp !== null) a.hp = hp;
+}
+steady();
 g.dropItem(f1, tileUnder(a, PLAYER_BOX), { type: ITEM.GOLD, amount: 25 });
 const gold0 = a.gold;
 idle(12);
@@ -79,9 +105,13 @@ check('gold is picked up by walking over it', a.gold >= gold0 + 25, `${gold0} ->
 
 g.dropItem(f1, tileUnder(a, PLAYER_BOX), { type: ITEM.POTION, kind: 'healing' });
 idle(12);
-check('a potion goes in the pack', a.bag.some(s => s && s.item.type === ITEM.POTION));
-a.hp = 1;
-const potSlot = a.bag.findIndex(s => s && s.item.type === ITEM.POTION);
+check('a potion goes in the pack',
+  a.bag.some(s => s && s.item.type === ITEM.POTION && s.item.kind === 'healing'));
+steady(1);
+// The hero may have swept up someone else's potion on the way here, so pick
+// the healing one rather than the first bottle in the pack.
+const potSlot = a.bag.findIndex(s => s && s.item.type === ITEM.POTION &&
+  s.item.kind === 'healing');
 g.useSlot(a, potSlot);
 check('drinking it heals', a.hp > 1, `hp=${a.hp}`);
 check('and identifies the potion for the party', g.known.potions.includes('healing'));
@@ -90,7 +120,10 @@ check('and identifies the potion for the party', g.known.potions.includes('heali
 {
   const before = a.equip.weapon.tier;
   g.take(a, f1, { type: ITEM.WEAPON, tier: 4, upgrade: 1 });
-  const wSlot = a.bag.findIndex(s => s && s.item.type === ITEM.WEAPON);
+  // the hero may already be carrying a weapon off the floor, so find the one
+  // that was just handed over
+  const wSlot = a.bag.findIndex(s => s && s.item.type === ITEM.WEAPON &&
+    s.item.tier === 4 && s.item.upgrade === 1);
   check('better gear waits in the pack rather than auto-equipping',
     wSlot >= 0 && a.equip.weapon.tier === before);
   g.invOp(a, 'equip', wSlot);
@@ -144,6 +177,9 @@ check('the snapshot stays small', JSON.stringify(snap).length < 3000,
   `${JSON.stringify(snap).length} bytes`);
 
 // --- descending ------------------------------------------------------------
+steady();
+a.depth = 1; b.depth = 1;
+f1 = g.floor(1);
 const exitPix = tileToPixel(f1.level.exit, PLAYER_BOX);
 a.x = exitPix.x; a.y = exitPix.y;
 g.step();

@@ -33,6 +33,7 @@ export const TT = {
   SIGN: 23,
   RUBBLE: 24,
   CRACKED: 25,     // gives way the moment you stand on it
+  SECRET_DOOR: 26, // reads as wall until somebody searches it
 };
 
 // A tile you can walk onto.
@@ -45,7 +46,7 @@ const PASSABLE = new Set([
 // A tile that stops you seeing past it.
 const LOS_BLOCK = new Set([
   TT.WALL, TT.WALL_DECO, TT.DOOR, TT.LOCKED_DOOR, TT.BARRICADE,
-  TT.HIGH_GRASS, TT.BOOKSHELF, TT.STATUE, TT.LOCKED_EXIT,
+  TT.HIGH_GRASS, TT.BOOKSHELF, TT.STATUE, TT.LOCKED_EXIT, TT.SECRET_DOOR,
 ]);
 
 // A tile a flying creature can cross that a walker cannot.

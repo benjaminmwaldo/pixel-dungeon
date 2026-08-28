@@ -762,3 +762,41 @@ export const SHOPKEEPER2 = `
 ..050........050
 ..050........050
 ...00.........00`;
+
+
+// A mimic, mid-decision about whether to keep pretending.
+export const MIMIC1 = `
+................
+................
+..0kkkkkkkkkk0..
+.0klllllllllk0..
+.0kl0ll0ll0llk0.
+.0klllllllllk0..
+.0kkkkkkkkkkk0..
+.0kgggggggggk0..
+.0kl11l11l11lk0.
+.0kllllllllllk0.
+.0kl11l11l11lk0.
+.0kkkkkkkkkkkk0.
+..0kkkkkkkkkk0..
+...00000000000..
+................
+................`;
+
+export const MIMIC2 = `
+................
+................
+..0kkkkkkkkkk0..
+.0klllllllllk0..
+.0kl0ll0ll0llk0.
+.0kkkkkkkkkkk0..
+..0dddddddddd0..
+..0d11d11d11d0..
+..0dddddddddd0..
+.0kl11l11l11lk0.
+.0kllllllllllk0.
+.0kl11l11l11lk0.
+.0kkkkkkkkkkkk0.
+..0kkkkkkkkkk0..
+...00000000000..
+................`;

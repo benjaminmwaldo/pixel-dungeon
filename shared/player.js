@@ -90,9 +90,11 @@ export function playerStep(p, bits, tiles, cls, mods = NO_MODS) {
       PLAYER_BOX, p.ghost ? MODE.FLY : MODE.WALK, true);
     ev.blockedBy = r.blockedBy;
     p.walk = (p.walk + 1) % 16;
+    p.still = 0;
     ev.moved = true;
   } else {
     p.walk = 0;
+    p.still = (p.still || 0) + 1;
   }
   return ev;
 }
