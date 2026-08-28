@@ -30,6 +30,22 @@ jobs:
           node scripts/validate-art.js
           node scripts/levelgen-test.js 10
           node scripts/smoke.js
+          node scripts/buff-test.js
+          node scripts/trap-test.js
+          node scripts/shop-test.js
+          node scripts/secrets-test.js
+          node scripts/ench-test.js
+          node scripts/ring-test.js
+          node scripts/wand-test.js
+          node scripts/missile-test.js
+          node scripts/artifact-test.js
+          node scripts/champion-test.js
+          node scripts/boss-test.js
+          node scripts/quest-test.js
+          node scripts/roster-test.js
+          node scripts/plant-test.js
+          node scripts/alchemy-test.js
+          node scripts/ascent-test.js
           node scripts/build-pages.js
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

@@ -58,9 +58,14 @@ whole level, fog of war, and twenty-five floors in five themed chapters.
   worse than a human and explores better.
 - Ranged classes have not been played through a full run; the warrior has.
 - No persistence: closing the tab ends the run.
-- Libraries and gardens are still decorated rather than furnished; the newer
-  special rooms (armoury, crypt, pool, laboratory, storage, trap room) each get
-  their own contents, and the older six should be brought up to match.
+- Libraries and magic wells are still decorated rather than furnished. Every
+  other special room now gets its own contents; those two should be brought up
+  to match.
+- The game is much bigger than it was: five hundred-odd distinct things across
+  buffs, traps, gear marks, rings, wands, missiles, artifacts, plants, badges
+  and creatures. None of it has been balanced against real players — only
+  against an automated one, which fights worse than a human and explores
+  better.
 - The old Zelda-style hand-built dungeon is gone (`shared/dungeon.js` and the
   room-transition code were deleted, not kept in parallel).
 
@@ -91,6 +96,20 @@ whole level, fog of war, and twenty-five floors in five themed chapters.
   the pack rather than the one the check had just added, and the harness
   teleporting the hero onto a weak floor mid-fight. Six hundred consecutive
   runs are clean, and every suite now survives a hundred-run stress loop.
+- **Two silent-disappearance bugs on the wire.** A non-finite coordinate JSON-
+  encodes as null, and the client then draws that entity nowhere at all with
+  nothing said about it; and `Math.max(0, NaN)` is NaN, so the client's
+  interpolation put every entity at nowhere whenever it was handed a bad
+  timestamp. Both are guarded, and the smoke test checks four hundred
+  consecutive frames of wire traffic for non-finite positions.
+- **The shopkeeper and the mimic had no sprites**, so both had been drawing as
+  nothing at all since the day they were added.
+- **A quest hook sat below an early return** in the kill handler, so a monster
+  that splits when it dies — which the sewers are full of — never registered as
+  the one the ghost wanted.
+- **Beams and cones sampled only at tile centres**, so anything standing
+  between two samples was passed straight over. Both now sweep the line in
+  small steps and test against the real hitbox.
 - **A lit room revealed more than you could see.** The whole-room reveal ignored
   the sight radius, so blindness and a dark floor did nothing indoors — which
   is most of the game. The reveal is now clipped to the radius.
