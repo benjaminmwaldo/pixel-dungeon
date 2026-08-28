@@ -12,7 +12,7 @@ Where a mechanic assumes turns, it is restated for real time — noted inline.
 
 ---
 
-## Wave 1 — the buff framework (foundation)
+## Wave 1 — the buff framework (foundation) — **done**
 
 SPD has ~70 buffs. They are the substrate: enchantments, glyphs, traps, potions,
 wands and mob abilities all just apply one.
@@ -30,7 +30,7 @@ wands and mob abilities all just apply one.
   stays exact.
 - Buff icons along the status bar.
 
-## Wave 2 — the item classes that are missing
+## Wave 2 — the item classes that are missing — **next**
 
 **Rings** (12 in SPD). Two ring slots, unidentified until worn a while,
 upgradeable, sometimes cursed. Accuracy, evasion, elements, energy, force,
@@ -62,30 +62,37 @@ that lifts them.
 liquid flame, mind vision, purity — and identify variants, lullaby, mirror
 image, retribution, transmutation, remove curse.
 
-## Wave 3 — the floors themselves
+## Wave 3 — the floors themselves — **done**
 
-**Special rooms** (24 kinds; this game has 6). Shop, laboratory, treasury,
-armory, library, garden, magic well, pool, statuary, crypt, pit, weak floor,
-traps, storage, sentry, magical fire, toxic gas, runestone, sacrifice, crystal
-vault/choice/path, demon spawner.
+**Special rooms** — *shipped: 14.* Treasure, library, garden, magic well,
+statuary, vault, shop, armory, crypt, pool, trap room, storage, laboratory,
+weak floor. Each is furnished when the floor wakes: grave goods and the
+skeletons that came with them, a prize ringed by live traps, a floor that gives
+way. Not doing: sentry, runestone, sacrifice, crystal path, demon spawner.
 
-**Shops and a shopkeeper.** Gold currently has nothing to buy. A shop floor per
-chapter, an NPC who sells and buys, and prices that scale with depth.
+**Shops and a shopkeeper** — *shipped.* One shop on the floor that opens each
+chapter after the sewers (6, 11, 16, 21). Stock laid out with price tags, E to
+buy what is under your feet, drop something inside to sell it, and a shopkeeper
+who vanishes with the entire stock if you raise a hand to him.
 
-**Traps** (33 kinds; this game has one). Worn dart, poison dart, alarm, gripping,
-summoning, teleportation, ooze, burning, blazing, chilling, frost, shocking,
-storm, toxic, corrosion, flock, guardian, pitfall, rockfall, disarming,
-weakening, confusion, flashing, warping, distortion, grim, cursing,
-disintegration, explosive, geyser, gateway.
+**Traps** — *shipped: 24,* gated by depth so the nastier ones stay deep, each
+floor recording which trap sits where so a revealed one shows what it will do.
+The ones that differ only in flavour were folded together.
 
-**Mimics.** Chests that are not chests. Regular, golden, ebony, crystal.
+**Mimics** — *shipped.* No chests in this game, so a mimic waits as a piece of
+loot instead, and gives back what it was pretending to be when it dies.
 
-**Chasms you can jump down**, falling to the next floor and taking the drop.
+**Chasms you can jump down** — *shipped.* Stand at the lip and press E. Weak
+floors give way on their own and leave a hole behind them.
 
-**Secret doors and searching.** Rooms you only find by looking.
+**Secret doors and searching** — *shipped.* Only ever on a dead-end special
+room, so nothing you need can be sealed away. Stand still to search; a rogue
+finds them while walking.
 
-**Level feelings** — the floor announcing itself as unusually large, dark,
-overgrown, watery, trapped, or hiding something.
+**Level feelings** — *shipped: four.* Dangerous (half again as many monsters),
+treasure (extra drops and a prize), trapped (a second helping of traps), and
+dark (sight radius cut by three, which now bites indoors too — a lit room no
+longer reveals further than you can see).
 
 ## Wave 4 — actors
 

@@ -53,17 +53,14 @@ whole level, fog of war, and twenty-five floors in five themed chapters.
   that broker offers STUN but no TURN relay. Strict corporate, school or
   symmetric-NAT networks may refuse the connection; home wifi and hotspots are
   the target. If that ever bites, the fix is a TURN server, not a rewrite.
-- One smoke-test run failed twice during a full sweep and could not be
-  reproduced in 25 consecutive runs afterwards. Not chased down; the CI
-  workflow runs the suite on every push, which will surface it if it recurs.
-
 - Difficulty is not yet playtested with real people. Contact damage, mercy
   frames and mob density were tuned against an automated player, which fights
   worse than a human and explores better.
 - Ranged classes have not been played through a full run; the warrior has.
 - No persistence: closing the tab ends the run.
-- Special rooms are decorated but their contents are still mostly generic loot;
-  libraries could guarantee scrolls, gardens could hide a seed cache.
+- Libraries and gardens are still decorated rather than furnished; the newer
+  special rooms (armoury, crypt, pool, laboratory, storage, trap room) each get
+  their own contents, and the older six should be brought up to match.
 - The old Zelda-style hand-built dungeon is gone (`shared/dungeon.js` and the
   room-transition code were deleted, not kept in parallel).
 
@@ -84,6 +81,19 @@ whole level, fog of war, and twenty-five floors in five themed chapters.
   called `restart()` but only the explicit "play again" path broadcast the
   start message, so every client sat on the death screen forever while a fresh
   dungeon ran underneath them.
+- **The intermittent smoke-test failure is diagnosed and fixed.** It was four
+  separate pieces of test fragility, all of one kind: the harness kept acting
+  on a party that had wiped. A wipe ends the run, so the simulation refuses
+  every subsequent action, and the restart timer rebuilds the dungeon, leaving
+  the captured floor object orphaned — which showed up as a cascade of
+  unrelated-looking failures. The other three: an "invulnerable" hero still
+  dying to traps and poison, `findIndex` grabbing the first potion or weapon in
+  the pack rather than the one the check had just added, and the harness
+  teleporting the hero onto a weak floor mid-fight. Six hundred consecutive
+  runs are clean, and every suite now survives a hundred-run stress loop.
+- **A lit room revealed more than you could see.** The whole-room reveal ignored
+  the sight radius, so blindness and a dark floor did nothing indoors — which
+  is most of the game. The reveal is now clipped to the radius.
 - Encounters were far too rare in real time — monsters only noticed you on
   line of sight. They now hear you within six tiles, and floors carry more
   monsters and more loot.
