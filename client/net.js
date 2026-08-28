@@ -169,6 +169,7 @@ export class Net {
     s.knockT = me[12]; s.knockX = me[13]; s.knockY = me[14];
     s.stun = me[15];
     this.gold = me[16]; this.hunger = me[17]; this.invis = me[18];
+    this.dew = me[24] || 0;
     this.reviveT = me[19]; this.revivedBy = me[20];
     this.livePoints = me[21] ?? this.perkPoints;
     this.moveMult = (me[22] ?? 100) / 100;
@@ -289,6 +290,7 @@ export class Net {
         cls: this.cls, invuln: this.invuln, invis: this.invis,
         hp: this.hp, maxHp: this.maxHp, level: this.level_,
         xp: this.xp, xpNext: this.xpNext, gold: this.gold, hunger: this.hunger,
+        dew: this.dew,
         abilityCd: me.abilityCd,
       },
       ents, items, others,

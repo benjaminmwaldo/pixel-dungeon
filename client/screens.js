@@ -9,8 +9,9 @@ import { RINGS, RING_TINT } from '../shared/rings.js';
 import { WANDS, WAND_TINT } from '../shared/wands.js';
 import { MISSILES, missilePower } from '../shared/missiles.js';
 import { ARTIFACTS, artMax } from '../shared/artifacts.js';
+import { PLANTS } from '../shared/plants.js';
 import { TREES, PERKS, perksInTree, treesFor, canTake } from '../shared/perks.js';
-import { IMG, blit, text, textCentered, textWidth, potionImg, ringImg, wandImg } from './art/bake.js';
+import { IMG, blit, text, textCentered, textWidth, potionImg, ringImg, wandImg, seedImg } from './art/bake.js';
 
 const C = {
   panel: '#0B0E18', frame: '#39405C', dim: '#1A2032',
@@ -48,6 +49,8 @@ export function iconFor(item, st) {
     case ITEM.WAND:
       return wandImg(WAND_TINT[st.app?.wandLook?.[item.kind]] || '#FCFCFC');
     case ITEM.MISSILE: return IMG.MISSILE;
+    case ITEM.SEED: return seedImg(PLANTS[item.kind]?.colour || '#58C038');
+    case ITEM.DEW: return IMG.DEW;
     case ITEM.ARTIFACT: return IMG.ARTIFACT;
     case ITEM.QUEST: return IMG.AMULET;
     default: return null;
@@ -118,6 +121,8 @@ function describe(item, st, short = false) {
       const def = MISSILES[item.kind];
       return def ? `${missilePower(def, st.depth || 1, 0)} DAMAGE  -  ${def.blurb}` : '';
     }
+    case ITEM.SEED: return PLANTS[item.kind]?.blurb || '';
+    case ITEM.DEW: return 'A LITTLE HEALTH, OR A LITTLE PUT BY';
     case ITEM.QUEST: return 'SOMEBODY ON THIS FLOOR IS WAITING FOR THIS';
     case ITEM.ARTIFACT: {
       const def = ARTIFACTS[item.kind];
@@ -254,6 +259,7 @@ function actionHint(item, ui) {
   if (ui.held !== null) return 'C AGAIN TO PLACE IT';
   if (item.type === ITEM.WEAPON || item.type === ITEM.ARMOR) return 'ENTER TO WEAR IT';
   if (item.type === ITEM.KEY || item.type === ITEM.GOLDKEY) return 'USED BY WALKING INTO A LOCKED DOOR';
+  if (item.type === ITEM.SEED) return 'ENTER TO SOW IT WHERE YOU FACE';
   if (item.type === ITEM.QUEST) return 'CARRY IT BACK TO WHOEVER ASKED';
   if (item.type === ITEM.MISSILE) return 'ENTER TO THROW ONE WHERE YOU FACE';
   if (item.type === ITEM.ARTIFACT) {

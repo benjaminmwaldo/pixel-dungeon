@@ -56,7 +56,7 @@ export const KIND = {
 
   // ---- the world, 80+ ----------------------------------------------------
   ITEM: 80, BOMB: 81, BLAST: 82, POOF: 83, GAS: 84, WARD: 85, THROWN: 86,
-  SPIRIT: 87,
+  SPIRIT: 87, PLANT: 88,
 };
 
 export const MOB_MIN = 1, MOB_MAX = 59;
@@ -111,6 +111,8 @@ export const XP_PER_LEVEL = (lvl) => 8 + lvl * 6;
 export const HP_PER_LEVEL = 4;
 
 export const HUNGER_MAX = 5400;       // 3 minutes of walking per ration
+// How much dew a vial holds before it will not take any more.
+export const DEW_MAX = 100;
 export const HUNGER_HURT = 90;        // ticks between starvation damage
 
 // Input bit flags.

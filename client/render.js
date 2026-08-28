@@ -13,6 +13,7 @@ import { LEVEL_W, LEVEL_H, TT, idx, tx, ty, regionOf } from '../shared/terrain.j
 import { ITEM, POTION_TINT } from '../shared/items.js';
 import { RING_TINT } from '../shared/rings.js';
 import { WAND_TINT } from '../shared/wands.js';
+import { PLANTS, plantById } from '../shared/plants.js';
 import { MOBS } from '../shared/mobs.js';
 import { CHAMPIONS, champById } from '../shared/champions.js';
 import { BUFFS } from '../shared/buffs.js';
@@ -20,6 +21,7 @@ import { TRAPS, trapById } from '../shared/traps.js';
 import {
   IMG, TILE_IMG, TILE_DIM, WATER_IMG, WATER_DIM, HERO_IMG, bakeAll,
   blit, text, textCentered, textWidth, silhouette, potionImg, ringImg, wandImg,
+  plantImg, seedImg,
 } from './art/bake.js';
 
 const C = {
@@ -282,6 +284,11 @@ export class Renderer {
     const shot = SHOT_SPRITE[e.kind];
     if (shot) { blit(g, IMG[shot], e.x, e.y); return; }
 
+    if (e.kind === KIND.PLANT) {
+      const def = PLANTS[plantById(e.flags)];
+      blit(g, plantImg(def?.colour || '#58C038'), e.x - 4, e.y - 4);
+      return;
+    }
     if (e.kind === KIND.SPIRIT) {
       const spr = ((f >> 3) & 1) ? IMG.SPIRIT2 : IMG.SPIRIT1;
       g.globalAlpha = 0.7;
@@ -360,6 +367,8 @@ export class Renderer {
         return wandImg(WAND_TINT[look] || '#FCFCFC');
       }
       case ITEM.MISSILE: return IMG.MISSILE;
+      case ITEM.SEED: return seedImg(PLANTS[e.kind]?.colour || '#58C038');
+      case ITEM.DEW: return IMG.DEW;
       case ITEM.ARTIFACT: return IMG.ARTIFACT;
       case ITEM.QUEST: return IMG.AMULET;
       default: return null;
@@ -399,7 +408,12 @@ export class Renderer {
 
     blit(g, IMG.GOLD_PILE, 170, -2);
     text(g, String(me.gold), 186, 3, 'gold', 6);
-    text(g, CLASSES[me.cls]?.name || '', 236, 3, 'grey', 6);
+    if (me.dew > 0) {
+      // what the vial has put by, next to the purse
+      blit(g, IMG.DEW, 214, -2);
+      text(g, String(me.dew), 230, 3, 'blue', 6);
+    }
+    text(g, CLASSES[me.cls]?.name || '', 252, 3, 'grey', 6);
 
     for (let i = 0; i < 8; i++) {
       const x = 180 + i * 17;

@@ -34,13 +34,14 @@ export const TT = {
   RUBBLE: 24,
   CRACKED: 25,     // gives way the moment you stand on it
   SECRET_DOOR: 26, // reads as wall until somebody searches it
+  POT: 27,         // the alchemy pot in a laboratory
 };
 
 // A tile you can walk onto.
 const PASSABLE = new Set([
   TT.FLOOR, TT.FLOOR_DECO, TT.GRASS, TT.HIGH_GRASS, TT.WATER, TT.OPEN_DOOR,
   TT.ENTRANCE, TT.EXIT, TT.EMBERS, TT.TRAP_HIDDEN, TT.TRAP, TT.TRAP_SPENT,
-  TT.PEDESTAL, TT.SIGN, TT.RUBBLE, TT.CRACKED,
+  TT.PEDESTAL, TT.SIGN, TT.RUBBLE, TT.CRACKED, TT.POT,
 ]);
 
 // A tile that stops you seeing past it.
@@ -56,7 +57,7 @@ const FLYABLE = new Set([TT.CHASM, TT.WATER]);
 const SHOT_PASS = new Set([
   TT.FLOOR, TT.FLOOR_DECO, TT.GRASS, TT.HIGH_GRASS, TT.WATER, TT.CHASM,
   TT.OPEN_DOOR, TT.ENTRANCE, TT.EXIT, TT.EMBERS, TT.TRAP_HIDDEN, TT.TRAP,
-  TT.TRAP_SPENT, TT.PEDESTAL, TT.SIGN, TT.RUBBLE, TT.WELL, TT.CRACKED,
+  TT.TRAP_SPENT, TT.PEDESTAL, TT.SIGN, TT.RUBBLE, TT.WELL, TT.CRACKED, TT.POT,
 ]);
 
 const FLAMMABLE = new Set([TT.GRASS, TT.HIGH_GRASS, TT.DOOR, TT.OPEN_DOOR, TT.BARRICADE, TT.BOOKSHELF]);

@@ -380,6 +380,7 @@ function promptForTile(st) {
   else if (t === TT.LOCKED_EXIT) renderer.prompt('SEALED UNTIL THE BOSS FALLS');
   else if (t === TT.WELL) renderer.prompt('E - DRINK');
   else if (t === TT.PEDESTAL) renderer.prompt('E - TAKE IT');
+  else if (t === TT.POT) renderer.prompt('E - BREW THREE SEEDS');
   else if (chasmBeside()) renderer.prompt('E - LEAP DOWN');
 }
 

@@ -150,6 +150,8 @@ export function bakeAll() {
   IMG.POTION_TINTS = {};
   IMG.RING_TINTS = {};
   IMG.WAND_TINTS = {};
+  IMG.PLANT_TINTS = {};
+  IMG.SEED_TINTS = {};
 
   for (const [key, colour] of Object.entries({
     white: '#FCFCFC', gold: '#F8B800', red: '#F83800', grey: '#8890A0',
@@ -157,6 +159,24 @@ export function bakeAll() {
   })) {
     FONT_IMG[key] = bakeFont(colour);
   }
+}
+
+/** A plant, drawn in the colour of whatever is flowering. */
+export function plantImg(tint) {
+  IMG.PLANT_TINTS ??= {};
+  if (!IMG.PLANT_TINTS[tint]) {
+    IMG.PLANT_TINTS[tint] = bake(GEAR.PLANT, `plant:${tint}`, { W: tint });
+  }
+  return IMG.PLANT_TINTS[tint];
+}
+
+/** A seed, in the colour of what it will become. */
+export function seedImg(tint) {
+  IMG.SEED_TINTS ??= {};
+  if (!IMG.SEED_TINTS[tint]) {
+    IMG.SEED_TINTS[tint] = bake(GEAR.SEED, `seed:${tint}`, { W: tint });
+  }
+  return IMG.SEED_TINTS[tint];
 }
 
 /** A wand drawn in the wood this run gave it. */

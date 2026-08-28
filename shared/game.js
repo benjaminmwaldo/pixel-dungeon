@@ -5,7 +5,7 @@
 import {
   TILE, KIND, CLASSES, CLASS_ORDER, PLAYER_BOX, INVULN_TICKS,
   KNOCKBACK_TICKS, KNOCKBACK_SPEED, REVIVE_TICKS, GHOST_TICKS, MAX_PLAYERS,
-  XP_PER_LEVEL, HP_PER_LEVEL, HUNGER_MAX, HUNGER_HURT, N, E, S, W, DX, DY,
+  XP_PER_LEVEL, HP_PER_LEVEL, HUNGER_MAX, HUNGER_HURT, DEW_MAX, N, E, S, W, DX, DY,
   isMob, isBoss, isNpc, rectsOverlap, clamp, dist2,
 } from './constants.js';
 import {
@@ -28,6 +28,9 @@ import { WANDS, wandPower, tickWand, refill } from './wands.js';
 import { MISSILES, missilePower } from './missiles.js';
 import { rollWand } from './wands.js';
 import { rollRing } from './rings.js';
+import {
+  PLANTS, PLANT, PLANT_IDS, rollPlant, plantIndex, BREWS, BREW_COST,
+} from './plants.js';
 import {
   ARTIFACTS, ART, ART_IDS, artMax, makeArtifact, rollArtifact,
   feed, tickArtifact, MAX_ART_LEVEL,
@@ -1119,6 +1122,109 @@ export class Game {
     this.dropItem(f, spot, { type: ITEM.MISSILE, kind: e.missile, amount: 1 });
   }
 
+  /**
+   * The pot in a laboratory. Three seeds go in and a potion comes out: three
+   * of a kind gives you what that seed makes, and a mixed handful gives you
+   * one of the three at random, which is the whole gamble.
+   */
+  brew(p, f) {
+    const seeds = [];
+    for (let i = 0; i < p.bag.length && seeds.length < BREW_COST; i++) {
+      const slot = p.bag[i];
+      if (slot?.item?.type !== ITEM.SEED) continue;
+      const take = Math.min(slot.count, BREW_COST - seeds.length);
+      for (let n = 0; n < take; n++) seeds.push(slot.item.kind);
+      slot.count -= take;
+      if (slot.count <= 0) p.bag[i] = null;
+    }
+    if (seeds.length < BREW_COST) {
+      // put back what we took: no half brews
+      for (const kind of seeds) this.addToBag(p, { type: ITEM.SEED, kind, amount: 1 });
+      this.banner(`THE POT WANTS ${BREW_COST} SEEDS`, 1600);
+      return;
+    }
+
+    const same = seeds.every(k => k === seeds[0]);
+    const pick = same ? seeds[0] : seeds[Math.floor(Math.random() * seeds.length)];
+    const kind = BREWS[pick] || 'healing';
+    const potion = { type: ITEM.POTION, kind };
+    if (!this.take(p, f, potion)) this.dropItem(f, tileUnder(p, PLAYER_BOX), potion);
+    this.fx(f, 'drink', p.x + 8, p.y + 8);
+    this.banner(same ? 'THE POT GIVES YOU EXACTLY WHAT YOU ASKED FOR'
+                     : 'SOMETHING COMES OUT OF THE POT', 1800);
+    this.metaDirty = true;
+  }
+
+  /** Put a seed in the ground one tile ahead of you. */
+  sow(p, f, n) {
+    const slot = p.bag[n];
+    if (!slot) return;
+    const kind = slot.item.kind;
+    const dx = DX[p.dir], dy = DY[p.dir];
+    const at = tileUnder({ x: p.x + dx * TILE, y: p.y + dy * TILE }, PLAYER_BOX);
+    const here = tileUnder(p, PLAYER_BOX);
+    const spot = this.sowable(f, at) ? at : this.sowable(f, here) ? here : null;
+    if (spot === null) { this.banner('NOTHING WILL TAKE ROOT THERE', 1300); return; }
+
+    if (--slot.count <= 0) p.bag[n] = null;
+    this.plant(f, spot, kind);
+    this.fx(f, 'heal', tx(spot) * TILE + 8, ty(spot) * TILE + 8);
+    this.banner(`${PLANTS[kind].name} TAKES ROOT`, 1400);
+    this.metaDirty = true;
+  }
+
+  /** Will anything grow on this tile? */
+  sowable(f, i) {
+    if (i === null || i === undefined) return false;
+    const t = f.tiles[i];
+    if (t !== TT.FLOOR && t !== TT.FLOOR_DECO && t !== TT.GRASS && t !== TT.EMBERS) return false;
+    return !f.ents.some(e => !e.dead && e.kind === KIND.PLANT && tileUnder(e, e.box) === i);
+  }
+
+  /** Grow one, wherever it came from. */
+  plant(f, tile, kind) {
+    const px = tileToPixel(tile, { x: 4, y: 4, w: 8, h: 8 });
+    const e = {
+      id: this.entSeq++, kind: KIND.PLANT, x: px.x, y: px.y, dir: 0,
+      box: { x: 4, y: 4, w: 8, h: 8 }, t: 0, plant: kind,
+    };
+    f.ents.push(e);
+    return e;
+  }
+
+  /** Something stood on it. It does its one thing and is gone. */
+  trample(e, f, who, isHero) {
+    const def = PLANTS[e.plant];
+    if (!def) { e.dead = true; return; }
+    e.dead = true;
+    const x = e.x + 8, y = e.y + 8;
+    this.fx(f, 'poof', x, y);
+    this.banner(def.name, 1200);
+
+    if (def.buff) this.afflict(who, def.buff[0], def.buff[1], 1, f);
+    if (def.cloud) this.cloud(f, x, y, def.cloud[2], def.cloud[0], def.cloud[1], null);
+    if (def.teleport && isHero) {
+      const spot = this.randomSpot(f);
+      if (spot) { who.x = spot.x; who.y = spot.y; who.fovTile = -1; }
+      this.fx(f, 'teleport', who.x + 8, who.y + 8);
+    } else if (def.teleport) {
+      const spot = this.randomSpot(f);
+      if (spot) { who.x = spot.x; who.y = spot.y; }
+    }
+    if (def.shout) {
+      for (const o of f.ents) {
+        if (o.dead || !isMob(o.kind) || isNpc(o.kind)) continue;
+        o.alerted = def.shout;
+      }
+    }
+    if (def.feeds && isHero) {
+      who.hunger = HUNGER_MAX;
+      this.healPlayer(who, 3);
+      this.fx(f, 'eat', x, y);
+    }
+    this.metaDirty = true;
+  }
+
   /** The nearest monster roughly in front of the hero. */
   nearestAhead(p, f, reach) {
     const dx = DX[p.dir], dy = DY[p.dir];
@@ -1209,6 +1315,13 @@ export class Game {
     if (t === TT.TRAP_HIDDEN || t === TT.TRAP) {
       f.set(i, TT.TRAP_SPENT);
       this.springTrap(p, f, i);
+    }
+
+    // anything growing under your feet goes off
+    for (const e of f.ents) {
+      if (e.dead || e.kind !== KIND.PLANT) continue;
+      if (!rectsOverlap(p.x + 2, p.y + 2, 12, 12, e.x + 2, e.y + 2, 12, 12)) continue;
+      this.trample(e, f, p, true);
     }
 
     if (t === TT.CRACKED) {
@@ -1363,6 +1476,19 @@ export class Game {
       p.gold += take;
       if (art?.kind === ART.ARMBAND) this.growArtifact(p, 'gold', take);
       this.fx(f, 'gold', p.x + 8, p.y + 8);
+      this.metaDirty = true;
+      return true;
+    }
+    if (item.type === ITEM.DEW) {
+      // a drop mends a little; what you cannot use goes into the vial
+      const want = p.maxHp - p.hp;
+      const worth = 1 + Math.floor(f.depth / 5);
+      if (want > 0) {
+        this.healPlayer(p, Math.min(want, worth));
+      } else {
+        p.dew = Math.min(DEW_MAX, (p.dew || 0) + worth);
+      }
+      this.fx(f, 'drink', p.x + 8, p.y + 8);
       this.metaDirty = true;
       return true;
     }
@@ -1750,6 +1876,16 @@ export class Game {
           }
           break;
         }
+        case ROOM.GARDEN: {
+          // a garden is where they grow on their own
+          const many = 3 + rng.int(3);
+          for (let n = 0; n < many; n++) {
+            const at = take();
+            if (at === null) break;
+            this.plant(f, at, rollPlant(f.depth, rng));
+          }
+          break;
+        }
         case ROOM.LABORATORY: {
           for (let n = 0; n < 3; n++) {
             const at = take();
@@ -1895,6 +2031,7 @@ export class Game {
     if (isWorn(it)) { this.equipFrom(p, n); return; }
     if (isPointed(it)) { this.pointWand(p, f, it); return; }
     if (it.type === ITEM.MISSILE) { this.throwMissile(p, f, n); return; }
+    if (it.type === ITEM.SEED) { this.sow(p, f, n); return; }
     if (it.type === ITEM.KEY || it.type === ITEM.GOLDKEY) return;  // spent on doors
 
     if (it.type === ITEM.FOOD) {
@@ -2245,6 +2382,9 @@ export class Game {
       rectsOverlap(p.x + 2, p.y + 2, 12, 12, e.x + 2, e.y + 2, 12, 12));
     if (good) return this.buy(p, f, good);
 
+    if (t === TT.POT) return void this.brew(p, f);
+
+
     if (t === TT.PEDESTAL) {
       const item = f.depth >= MAX_DEPTH ? { type: ITEM.RELIC } : rollPrize(f.depth, f.rng, this.artifactsSeen);
       f.set(i, TT.FLOOR_DECO);
@@ -2252,7 +2392,18 @@ export class Game {
       return;
     }
 
-    // nothing else here, but there is a hole beside you
+    // nothing else here: tip the vial out if you are hurt and carrying any
+    if ((p.dew || 0) > 0 && p.hp < p.maxHp) {
+      const drink = p.dew;
+      p.dew = 0;
+      this.healPlayer(p, drink);
+      this.fx(f, 'heal', p.x + 8, p.y + 8);
+      this.banner(`THE VIAL EMPTIES - ${drink} BACK`, 1600);
+      this.metaDirty = true;
+      return;
+    }
+
+    // or step over the edge, if there is one beside you
     if (this.chasmBeside(f, i)) this.leap(p, f);
   }
 
@@ -2433,6 +2584,19 @@ export class Game {
       if (e.fleeing > 0) e.fleeing--;
       if (e.alerted > 0) e.alerted--;
       this.stepEntity(e, f, players);
+    }
+
+    // a monster walking over a plant sets it off too, which is what makes
+    // sowing one in a doorway worth doing
+    for (const e of f.ents) {
+      if (e.dead || e.kind !== KIND.PLANT) continue;
+      for (const o of f.ents) {
+        if (o.dead || !isMob(o.kind) || isNpc(o.kind)) continue;
+        if (!rectsOverlap(e.x + 2, e.y + 2, 12, 12,
+                          o.x + o.box.x, o.y + o.box.y, o.box.w, o.box.h)) continue;
+        this.trample(e, f, o, false);
+        break;
+      }
     }
 
     // contact damage
@@ -3290,6 +3454,7 @@ export class Game {
         if (e.enraged) flags |= 16;
         flags |= BF.buffFlags(e) << 5;
         flags |= champIndex(e.champ) << 12;
+        if (e.kind === KIND.PLANT) flags = plantIndex(e.plant);
         ents.push([e.id, e.kind, at(e.x), at(e.y), e.dir | 0, flags,
                    e.hp | 0, e.maxHp | 0]);
       }
@@ -3316,7 +3481,7 @@ export class Game {
            p.abilityCd, p.knockT, Math.round(p.knockX), Math.round(p.knockY),
            p.stun, p.gold, Math.round(p.hunger), p.invis, p.reviveT | 0,
            p.revivedBy | 0, p.perkPoints, Math.round((p.moveMult ?? 1) * 100),
-           Math.round(p.shield || 0)],
+           Math.round(p.shield || 0), Math.round(p.dew || 0)],
       bf: BF.packBuffs(p),
       e: ents, it: items, o: others, pl: party,
       f: f.fx, tc: f.changes,

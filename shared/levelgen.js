@@ -587,13 +587,16 @@ function decorateRoom(tiles, room, region, rng) {
     case ROOM.TRAP_ROOM:
       inner((x, y, i) => { if (tiles[i] === TT.FLOOR) tiles[i] = TT.FLOOR_DECO; });
       break;
-    case ROOM.LABORATORY:
+    case ROOM.LABORATORY: {
       inner((x, y, i) => {
         if (tiles[i] !== TT.FLOOR) return;
         const edge = x === room.l + 1 || y === room.t + 1;
         tiles[i] = edge && rng.chance(0.5) ? TT.BOOKSHELF : TT.FLOOR_DECO;
       });
+      const pot = centreIdx(room);
+      if (tiles[pot] !== TT.WALL) tiles[pot] = TT.POT;
       break;
+    }
     case ROOM.WEAK_FLOOR:
       inner((x, y, i) => { if (tiles[i] === TT.FLOOR) tiles[i] = TT.CRACKED; });
       break;

@@ -7,13 +7,14 @@ import { dressGear, markName } from './enchants.js';
 import { RINGS, RING_IDS, RING_LOOKS, rollRing } from './rings.js';
 import { WANDS, WAND_IDS, WAND_LOOKS, rollWand } from './wands.js';
 import { MISSILES, rollMissile } from './missiles.js';
+import { PLANTS, rollSeed } from './plants.js';
 import { ARTIFACTS, rollArtifact } from './artifacts.js';
 
 export const ITEM = {
   GOLD: 'gold', FOOD: 'food', POTION: 'potion', SCROLL: 'scroll',
   WEAPON: 'weapon', ARMOR: 'armor', KEY: 'key', GOLDKEY: 'goldkey',
   BOMB: 'bomb', RELIC: 'relic', RING: 'ring', WAND: 'wand', MISSILE: 'missile',
-  ARTIFACT: 'artifact', QUEST: 'quest',
+  ARTIFACT: 'artifact', QUEST: 'quest', SEED: 'seed', DEW: 'dew',
 };
 
 // The twelve the original carries.
@@ -101,6 +102,13 @@ export function itemLabel(item, app, known) {
       return known.scrolls.includes(item.kind)
         ? `SCROLL OF ${item.kind.toUpperCase()}`
         : `SCROLL "${app.scrollLook[item.kind]}"`;
+    case ITEM.SEED: {
+      const def = PLANTS[item.kind];
+      const n = item.amount || 1;
+      const word = `${def ? def.name : 'PLAIN'} SEED`;
+      return n > 1 ? `${n} ${word}S` : word;
+    }
+    case ITEM.DEW: return 'DEWDROP';
     case ITEM.QUEST: return item.name || 'SOMETHING SOMEBODY WANTS';
     case ITEM.ARTIFACT: {
       const def = ARTIFACTS[item.kind];
@@ -143,7 +151,7 @@ export function isConsumable(item) {
   return item.type === ITEM.POTION || item.type === ITEM.SCROLL ||
          item.type === ITEM.FOOD || item.type === ITEM.BOMB ||
          item.type === ITEM.KEY || item.type === ITEM.GOLDKEY ||
-         item.type === ITEM.MISSILE;
+         item.type === ITEM.MISSILE || item.type === ITEM.SEED;
 }
 
 /** Kept in the quick bar and pointed, but never used up. */
@@ -161,6 +169,7 @@ export function isWorn(item) {
 export function stackKey(item) {
   if (item.type === ITEM.POTION || item.type === ITEM.SCROLL) return `${item.type}:${item.kind}`;
   if (item.type === ITEM.MISSILE) return `missile:${item.kind}`;
+  if (item.type === ITEM.SEED) return `seed:${item.kind}`;
   if (item.type === ITEM.RING) return `ring:${item.kind}:${item.upgrade || 0}`;
   if (item.type === ITEM.WAND) return `wand:${item.kind}:${item.upgrade || 0}:${item.serial || 0}`;
   if (item.type === ITEM.ARTIFACT) return `artifact:${item.kind}`;
@@ -190,7 +199,8 @@ export function rollLoot(depth, rng, { rich = false } = {}) {
   if (r < 0.60) return { type: ITEM.POTION, kind: rng.pick(COMMON_POTIONS) };
   if (r < 0.74) return { type: ITEM.SCROLL, kind: rng.pick(COMMON_SCROLLS) };
   if (r < 0.78) return { type: ITEM.BOMB, amount: rng.range(1, 3) };
-  if (r < 0.84) return rollMissile(depth, rng);
+  if (r < 0.81) return rollMissile(depth, rng);
+  if (r < 0.84) return rollSeed(depth, rng);
   if (r < 0.87) return rollRing(depth, rng);
   if (r < 0.90) return rollWand(depth, rng);
   const tier = clampTier(Math.ceil(depth / 5) + (rng.chance(0.25) ? 1 : 0));
@@ -218,9 +228,10 @@ export function rollPrize(depth, rng, seen = []) {
   return { type: ITEM.GOLD, amount: rng.range(60, 60 + depth * 12) };
 }
 
-/** What an enemy leaves behind, most of the time nothing. */
+/** What an enemy leaves behind, most of the time a drop of dew. */
 export function rollDrop(depth, rng) {
   const r = rng.next();
+  if (r < 0.30) return { type: ITEM.DEW };
   if (r < 0.55) return null;
   if (r < 0.78) return { type: ITEM.GOLD, amount: rng.range(3, 8 + depth * 3) };
   if (r < 0.86) return { type: ITEM.FOOD };
@@ -252,6 +263,8 @@ export function itemValue(item) {
     case ITEM.SCROLL: return item.kind === SCROLL.UPGRADE ? 300 : 45;
     case ITEM.QUEST: return 0;          // nobody but its owner wants it
     case ITEM.ARTIFACT: return 400 + (item.level || 0) * 80;
+    case ITEM.DEW: return 0;            // it is gone the moment you touch it
+    case ITEM.SEED: return 30 * (item.amount || 1);
     case ITEM.MISSILE: return (MISSILES[item.kind]?.dmg || 3) * 5 * (item.amount || 1);
     case ITEM.RING: return 200 + (item.upgrade || 0) * 60;
     case ITEM.WAND: return 220 + (item.upgrade || 0) * 70;

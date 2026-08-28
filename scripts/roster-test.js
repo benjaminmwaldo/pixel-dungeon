@@ -157,6 +157,8 @@ for (const k of [KIND.LASHER, KIND.SPAWNER]) {
 }
 
 // --- contact does what the entry says ----------------------------------------
+// Mercy frames space contact out, and a short effect can wear off before the
+// loop ends — so watch for it throughout rather than only looking at the end.
 function touched(k, ticks = 200) {
   const { g, p, f } = floorFor(18);
   for (const o of f.ents) if (isMob(o.kind) && !isNpc(o.kind)) o.dead = true;
@@ -164,35 +166,38 @@ function touched(k, ticks = 200) {
   e.alerted = 900;
   e.hp = e.maxHp = 900;
   p.invuln = 0;
+  const saw = new Set();
+  const gas = { seen: false };
   for (let i = 0; i < ticks; i++) {
     e.x = p.x + 4; e.y = p.y;
     e.hitCd = 0;
     p.hp = p.maxHp;
     g.step(); g.clearTransient();
+    for (const id of Object.keys(p.buffs || {})) saw.add(id);
+    if (f.ents.some(o => o.kind === KIND.GAS)) gas.seen = true;
   }
-  return { p, f };
+  return { p, f, saw, gas };
 }
 
 {
-  const { p } = touched(KIND.RIPPER);
-  check('a ripper demon leaves you bleeding', BF.has(p, B.BLEEDING));
+  const { saw } = touched(KIND.RIPPER);
+  check('a ripper demon leaves you bleeding', saw.has(B.BLEEDING));
 }
 {
-  const { p } = touched(KIND.SUCCUBUS);
-  check('a succubus charms you', BF.has(p, B.CHARM));
+  const { saw } = touched(KIND.SUCCUBUS);
+  check('a succubus charms you', saw.has(B.CHARM));
 }
 {
-  const { p } = touched(KIND.SPINNER);
-  check('a giant spinner poisons you', BF.has(p, B.POISON));
+  const { saw } = touched(KIND.SPINNER);
+  check('a giant spinner poisons you', saw.has(B.POISON));
 }
 {
-  const { p } = touched(KIND.SPARK);
-  check('a DM-100 shocks you still', BF.has(p, B.PARALYSIS));
+  const { saw } = touched(KIND.SPARK);
+  check('a DM-100 shocks you still', saw.has(B.PARALYSIS));
 }
 {
-  const { p, f } = touched(KIND.ENGINE);
-  check('a DM-200 fouls the air around it',
-    f.ents.some(e => e.kind === KIND.GAS) || BF.has(p, B.POISON));
+  const { saw, gas } = touched(KIND.ENGINE);
+  check('a DM-200 fouls the air around it', gas.seen || saw.has(B.POISON));
 }
 
 // --- floors still fill up ----------------------------------------------------
