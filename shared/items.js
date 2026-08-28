@@ -3,6 +3,7 @@
 // learns by drinking, reading, or finding a scroll of identify.
 
 import { rngFor } from './terrain.js';
+import { dressGear, markName } from './enchants.js';
 
 export const ITEM = {
   GOLD: 'gold', FOOD: 'food', POTION: 'potion', SCROLL: 'scroll',
@@ -77,11 +78,11 @@ export function itemLabel(item, app, known) {
     case ITEM.RELIC: return 'THE AMULET';
     case ITEM.WEAPON: {
       const w = WEAPONS[item.tier - 1];
-      return item.upgrade ? `+${item.upgrade} ${w.name}` : w.name;
+      return gearName(item, w.name);
     }
     case ITEM.ARMOR: {
       const a = ARMORS[item.tier - 1];
-      return item.upgrade ? `+${item.upgrade} ${a.name}` : a.name;
+      return gearName(item, a.name);
     }
     case ITEM.POTION:
       return known.potions.includes(item.kind)
@@ -93,6 +94,13 @@ export function itemLabel(item, app, known) {
         : `SCROLL "${app.scrollLook[item.kind]}"`;
     default: return '?';
   }
+}
+
+/** "+2 BLAZING SABRE", or just "SABRE" while nobody has worked it out. */
+function gearName(item, base) {
+  const plus = item.upgrade ? `+${item.upgrade} ` : '';
+  const mark = item.known ? markName(item) : null;
+  return mark ? `${plus}${mark} ${base}` : `${plus}${base}`;
 }
 
 /** Is this something you keep in the quick bar rather than wear? */
@@ -131,16 +139,18 @@ export function rollLoot(depth, rng, { rich = false } = {}) {
   if (r < 0.76) return { type: ITEM.SCROLL, kind: rng.pick(COMMON_SCROLLS) };
   if (r < 0.84) return { type: ITEM.BOMB, amount: rng.range(1, 3) };
   const tier = clampTier(Math.ceil(depth / 5) + (rng.chance(0.25) ? 1 : 0));
-  if (r < 0.92) return { type: ITEM.WEAPON, tier, upgrade: rng.chance(0.25) ? 1 : 0 };
-  return { type: ITEM.ARMOR, tier, upgrade: rng.chance(0.25) ? 1 : 0 };
+  if (r < 0.92) {
+    return dressGear({ type: ITEM.WEAPON, tier, upgrade: rng.chance(0.25) ? 1 : 0 }, depth, rng);
+  }
+  return dressGear({ type: ITEM.ARMOR, tier, upgrade: rng.chance(0.25) ? 1 : 0 }, depth, rng);
 }
 
 /** Something worth the walk — used for pedestals, vaults and bosses. */
 export function rollPrize(depth, rng) {
   const r = rng.next();
   const tier = clampTier(Math.ceil(depth / 5) + 1);
-  if (r < 0.28) return { type: ITEM.WEAPON, tier, upgrade: rng.range(1, 2) };
-  if (r < 0.56) return { type: ITEM.ARMOR, tier, upgrade: rng.range(1, 2) };
+  if (r < 0.28) return blessed({ type: ITEM.WEAPON, tier, upgrade: rng.range(1, 2) }, depth, rng);
+  if (r < 0.56) return blessed({ type: ITEM.ARMOR, tier, upgrade: rng.range(1, 2) }, depth, rng);
   if (r < 0.74) return { type: ITEM.SCROLL, kind: SCROLL.UPGRADE };
   if (r < 0.88) return { type: ITEM.POTION, kind: POTION.STRENGTH };
   return { type: ITEM.GOLD, amount: rng.range(60, 60 + depth * 12) };
@@ -155,6 +165,15 @@ export function rollDrop(depth, rng) {
   if (r < 0.93) return { type: ITEM.POTION, kind: rng.pick(COMMON_POTIONS) };
   if (r < 0.98) return { type: ITEM.SCROLL, kind: rng.pick(COMMON_SCROLLS) };
   return { type: ITEM.BOMB, amount: 1 };
+}
+
+/** A prize is worth the walk: often marked, never cursed. */
+function blessed(item, depth, rng) {
+  for (let n = 0; n < 6; n++) {
+    const tryIt = dressGear({ ...item }, depth, rng);
+    if (!tryIt.curse) return tryIt;
+  }
+  return item;
 }
 
 function clampTier(t) { return t < 1 ? 1 : t > 5 ? 5 : t; }

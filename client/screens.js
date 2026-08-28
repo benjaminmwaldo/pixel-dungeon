@@ -4,6 +4,7 @@
 
 import { SCREEN_W, SCREEN_H, CLASSES, CLASS_ORDER } from '../shared/constants.js';
 import { ITEM, POTION_TINT, WEAPONS, ARMORS, itemLabel, isConsumable } from '../shared/items.js';
+import { ENCHANTS, GLYPHS, CURSES } from '../shared/enchants.js';
 import { TREES, PERKS, perksInTree, treesFor, canTake } from '../shared/perks.js';
 import { IMG, blit, text, textCentered, textWidth, potionImg } from './art/bake.js';
 
@@ -43,16 +44,55 @@ export function iconFor(item, st) {
 }
 
 /** A line of flavour telling you what the thing actually does. */
-function describe(item, st) {
+/** What the writing on a piece of gear does, once somebody has worked it out. */
+const MARK_TEXT = {
+  blazing: 'SETS THEM ALIGHT', chilling: 'SLOWS WHAT IT HITS',
+  shocking: 'ARCS TO WHAT IS NEAR', vampiric: 'GIVES BACK WHAT IT TAKES',
+  grim: 'FINISHES THE WOUNDED', lucky: 'SHAKES COINS LOOSE',
+  projecting: 'REACHES FURTHER', elastic: 'SENDS THEM FLYING',
+  kinetic: 'BANKS A BLOW FOR THE NEXT', blooming: 'GRASS FOLLOWS IT',
+  corrupting: 'TURNS THEM ON EACH OTHER', blocking: 'SHIELDS AS YOU SWING',
+  unstable: 'NEVER THE SAME TWICE',
+  antimagic: 'BLUNTS MAGIC', thorns: 'ANSWERS THE ATTACKER',
+  stone: 'SOAKS BLOWS, SLOWS YOU', entanglement: 'ROOTS THEM WHERE THEY STAND',
+  repulsion: 'PUSHES THEM BACK', camouflage: 'HIDES YOU IN GRASS',
+  flow: 'SWIFT THROUGH WATER', obfuscation: 'MUFFLES YOUR STEP',
+  potential: 'RECHARGES WHEN STRUCK', swiftness: 'QUICK WHILE UNHURT',
+  viscosity: 'SPREADS THE PAIN OUT', affection: 'CHARMS WHAT STRIKES YOU',
+  brimstone: 'YOU WILL NOT BURN',
+  annoying: 'WAKES THE WHOLE FLOOR', displacing: 'THROWS YOU ACROSS THE FLOOR',
+  exhausting: 'WEARS YOU DOWN', sacrificial: 'DRAWS YOUR OWN BLOOD',
+  wayward: 'MISSES WHEN IT MATTERS', friendly: 'CALMS WHAT YOU HIT',
+  'anti-entropy': 'CHILLS THE WEARER', bulk: 'HEAVY AND SLOW',
+  metabolism: 'BURNS THROUGH RATIONS', multiplicity: 'CALLS THEM TO YOU',
+  overgrowth: 'GRASS SWALLOWS YOUR FEET', stench: 'FOULS THE AIR AROUND YOU',
+};
+
+/** Trim a line to what will actually fit in the space it is given. */
+function fit(str, px, size) {
+  if (!str) return '';
+  let out = str;
+  while (out.length > 1 && textWidth(out, size) > px) out = out.slice(0, -1);
+  return out;
+}
+
+function mark(item) {
+  if (!item?.known) return '';
+  const id = item.curse || item.ench || item.glyph;
+  const text = MARK_TEXT[id];
+  return text ? `  -  ${text}` : '';
+}
+
+function describe(item, st, short = false) {
   if (!item) return '';
   switch (item.type) {
     case ITEM.WEAPON: {
       const w = WEAPONS[item.tier - 1];
-      return `+${w.dmg + (item.upgrade || 0) * 2} DAMAGE`;
+      return `+${w.dmg + (item.upgrade || 0) * 2} DAMAGE${short ? '' : mark(item)}`;
     }
     case ITEM.ARMOR: {
       const a = ARMORS[item.tier - 1];
-      return `+${a.def + (item.upgrade || 0) * 1.5} ARMOUR`;
+      return `+${a.def + (item.upgrade || 0) * 1.5} ARMOUR${short ? '' : mark(item)}`;
     }
     case ITEM.FOOD: return 'FILLS YOU UP AND MENDS A LITTLE';
     case ITEM.BOMB: return 'SET IT DOWN AND STEP BACK';
@@ -131,11 +171,11 @@ export function drawInventory(R, st, ui) {
     box(g, ex, y, 136, 20, sel ? '#243055' : C.dim, sel ? C.gold : C.frame);
     blit(g, icon, ex + 2, y + 2);
     if (item) {
-      const name = itemLabel({ ...item, type: which === 'weapon' ? ITEM.WEAPON : ITEM.ARMOR },
-        st.app, st.known || { potions: [], scrolls: [] });
-      text(g, name.slice(0, 20), ex + 20, y + 3, sel ? 'white' : 'grey', 6);
-      text(g, describe({ ...item, type: which === 'weapon' ? ITEM.WEAPON : ITEM.ARMOR }, st),
-        ex + 20, y + 11, 'dark', 5);
+      const full = { ...item, type: which === 'weapon' ? ITEM.WEAPON : ITEM.ARMOR };
+      const name = itemLabel(full, st.app, st.known || { potions: [], scrolls: [] });
+      const tint = item.known && item.curse ? 'red' : (sel ? 'white' : 'grey');
+      text(g, fit(name, 136 - 22, 6), ex + 20, y + 3, tint, 6);
+      text(g, fit(describe(full, st, true), 136 - 22, 5), ex + 20, y + 11, 'dark', 5);
     }
   });
 
@@ -151,8 +191,8 @@ export function drawInventory(R, st, ui) {
   box(g, 10, 132, SCREEN_W - 20, 52);
   if (cur) {
     const label = itemLabel(cur, st.app, st.known || { potions: [], scrolls: [] });
-    text(g, label, 16, 138, 'gold', 7);
-    text(g, describe(cur, st), 16, 150, 'white', 6);
+    text(g, fit(label, SCREEN_W - 32, 7), 16, 138, cur.known && cur.curse ? 'red' : 'gold', 7);
+    text(g, fit(describe(cur, st), SCREEN_W - 32, 6), 16, 150, 'white', 6);
     text(g, actionHint(cur, ui), 16, 162, 'grey', 6);
   } else {
     text(g, ui.held !== null ? 'PICK A SLOT TO DROP IT INTO' : 'NOTHING THERE', 16, 138, 'grey', 7);

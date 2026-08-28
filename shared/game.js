@@ -27,6 +27,10 @@ import {
 import { computeStats, canTake, clientMods, PERKS } from './perks.js';
 import { toBase64 } from './b64.js';
 import * as BF from './buffs.js';
+import {
+  ENCHANTS, GLYPHS, CURSES, ENCH_IDS, ENCH, GLYPH, CURSE,
+  dressGear, markName, enchIndex, glyphIndex, curseIndex,
+} from './enchants.js';
 import { B } from './buffs.js';
 import { TRAPS, TRAP, trapIndex, rollTrap } from './traps.js';
 
@@ -210,14 +214,29 @@ export class Game {
     if (up.recharge && p.abilityCd > 0) p.abilityCd = Math.max(0, p.abilityCd - up.recharge);
     const eff = BF.summarise(p);
     p.effects = eff;
-    p.moveMult = eff.move;
     p.shield = eff.shield;
-    p.liveMods = { ...p.mods, speedMult: p.mods.speedMult * eff.move };
     if (eff.invisible) p.invis = Math.max(p.invis, 2);
     // standing in fire, or in water that puts it out
     const under = f.tiles[tileUnder(p, PLAYER_BOX)];
-    if (under === TT.WATER) { BF.clear(p, B.BURNING); }
-    if (under === TT.EMBERS && Math.random() < 0.02) BF.apply(p, B.BURNING, 90);
+
+    // what the armour does simply by being worn
+    const gl = p.equip.armor.glyph ? GLYPHS[p.equip.armor.glyph] : null;
+    const ac = p.equip.armor.curse ? CURSES[p.equip.armor.curse] : null;
+    let wear = 1;
+    if (gl?.slow) wear *= 0.9;
+    if (ac?.heavy) wear *= 0.82;
+    if (gl?.waterSpeed && under === TT.WATER) wear *= gl.waterSpeed;
+    if (gl?.calmSpeed && p.sinceHit > 240) wear *= gl.calmSpeed;
+    if (gl?.grassHide && (under === TT.GRASS || under === TT.HIGH_GRASS)) {
+      p.invis = Math.max(p.invis, 2);
+    }
+    if (gl?.fireproof) BF.clear(p, B.BURNING);
+    p.moveMult = eff.move * wear;
+    p.liveMods = { ...p.mods, speedMult: p.mods.speedMult * p.moveMult };
+    p.sinceHit = (p.sinceHit || 0) + 1;
+
+    if (under === TT.WATER && !gl?.fireproof) { BF.clear(p, B.BURNING); }
+    if (under === TT.EMBERS && !gl?.fireproof && Math.random() < 0.02) BF.apply(p, B.BURNING, 90);
 
     if (p.ghost) {
       p.reviveT--;
@@ -292,7 +311,9 @@ export class Game {
     dmg *= (p.effects?.taken ?? 1);
     const gear = p.equip.armor;
     const armour = ARMORS[gear.tier - 1].def + gear.upgrade * 1.5 + st.armour;
+    p.sinceHit = 0;
     let taken = Math.max(1, Math.round(dmg - armour * 0.5));
+    taken = this.procGlyph(p, taken, from, f);
     if (p.guarding) {
       taken = Math.max(0, Math.round(taken * st.guard));
       if (st.reflect && from && !from.dead) {
@@ -363,9 +384,12 @@ export class Game {
   resolveMelee(p, f) {
     const def = CLASSES[p.cls];
     const st = p.stats;
-    const box = meleeBox(p, Math.round(def.reach * st.reachMult));
-    if (!box) return;
     const w = p.equip.weapon;
+    const mark = w.ench ? ENCHANTS[w.ench] : null;
+    const curse = w.curse ? CURSES[w.curse] : null;
+    const reachMult = st.reachMult * (mark?.reach ?? 1);
+    const box = meleeBox(p, Math.round(def.reach * reachMult));
+    if (!box) return;
     const base = def.melee + WEAPONS[w.tier - 1].dmg + w.upgrade * 2
                + Math.floor(p.level * 0.6) + st.melee;
     for (const e of f.ents) {
@@ -379,13 +403,154 @@ export class Game {
       if (st.backstab > 1 && !e.alerted) dmg *= st.backstab;
       const sure = st.ambush && p.invis > 0;
       if (sure || Math.random() < st.crit) { dmg *= 2; this.fx(f, 'clang', e.x + 8, e.y + 8); }
+      // a wayward weapon simply misses sometimes
+      if (curse?.miss && Math.random() < curse.chance) {
+        this.fx(f, 'clang', e.x + 8, e.y + 8);
+        continue;
+      }
+      if (w.kinetic) { dmg += w.kinetic; w.kinetic = 0; }
       this.hurtMob(e, Math.round(dmg), p.dir, f, p);
       if (st.daze) e.frozen = Math.max(e.frozen, st.daze);
+      if (mark) this.procEnchant(p, w, mark, e, f, Math.round(dmg));
+      if (curse) this.procWeaponCurse(p, w, curse, e, f);
+      if (!w.known) this.learnGear(p, w, 'weapon');
     }
     // cut a path through the undergrowth
     const ahead = tileUnder({ x: p.x + DX[p.dir] * 10, y: p.y + DY[p.dir] * 10 }, PLAYER_BOX);
     if (f.tiles[ahead] === TT.HIGH_GRASS) f.set(ahead, TT.GRASS);
     if (f.tiles[ahead] === TT.BARRICADE) f.set(ahead, TT.EMBERS);
+  }
+
+  /** What a marked weapon does on top of the blow it just landed. */
+  procEnchant(p, w, mark, e, f, dealt) {
+    if (mark.unstable) {
+      // it never settles on one thing
+      const pick = ENCH_IDS[Math.floor(Math.random() * ENCH_IDS.length)];
+      const other = ENCHANTS[pick];
+      if (other && !other.unstable) return this.procEnchant(p, w, other, e, f, dealt);
+      return;
+    }
+    if (mark.stores) {
+      // it banks a little of every hit and spends it on the next
+      w.kinetic = Math.min(30, (w.kinetic || 0) + Math.round(dealt * 0.2));
+      return;
+    }
+    if (mark.chance && Math.random() >= mark.chance) return;
+
+    if (mark.buff) this.afflict(e, mark.buff[0], mark.buff[1], 1, f);
+    if (mark.drain) {
+      const back = Math.max(1, Math.round(dealt * mark.drain));
+      this.healPlayer(p, back);
+      this.fx(f, 'heal', p.x + 8, p.y + 8);
+    }
+    if (mark.reap && e.hp < e.maxHp * mark.reap && !isBoss(e.kind)) {
+      this.hurtMob(e, e.hp + 99, p.dir, f, p);
+      this.fx(f, 'blast', e.x + 8, e.y + 8);
+    }
+    if (mark.gold) {
+      p.gold += 2 + f.depth;
+      this.fx(f, 'gold', e.x + 8, e.y + 8);
+      this.metaDirty = true;
+    }
+    if (mark.arc) {
+      // lightning jumps to whatever else is standing close
+      for (const o of f.ents) {
+        if (o === e || o.dead || !isMob(o.kind)) continue;
+        if (dist2(o.x, o.y, e.x, e.y) > mark.arc * mark.arc) continue;
+        this.hurtMob(o, Math.max(1, Math.round(dealt * 0.5)), p.dir, f, p);
+        this.fx(f, 'spark', o.x + 8, o.y + 8);
+      }
+    }
+    if (mark.knock) {
+      e.knockX = DX[p.dir] * mark.knock;
+      e.knockY = DY[p.dir] * mark.knock;
+      e.knockT = 6;
+    }
+    if (mark.grass) {
+      const at = tileUnder(e, e.box);
+      if (f.tiles[at] === TT.FLOOR || f.tiles[at] === TT.FLOOR_DECO) f.set(at, TT.GRASS);
+    }
+    if (mark.shield) this.afflict(p, B.BARRIER, 240, mark.shield, f);
+  }
+
+  /** And what a cursed one does instead. */
+  procWeaponCurse(p, w, curse, e, f) {
+    if (curse.chance && Math.random() >= curse.chance) return;
+    if (curse.wake) {
+      for (const o of f.ents) if (isMob(o.kind)) o.alerted = 600;
+    }
+    if (curse.blink) {
+      const spot = this.randomSpot(f);
+      if (spot) { p.x = spot.x; p.y = spot.y; p.fovTile = -1; }
+      this.fx(f, 'poof', p.x + 8, p.y + 8);
+    }
+    if (curse.buff) this.afflict(p, curse.buff[0], curse.buff[1], 1, f);
+    if (curse.bleed) this.afflict(p, B.BLEEDING, 160, 1, f);
+    if (curse.pacify) { BF.clear(e, B.TERROR); e.alerted = 0; e.fleeing = 0; }
+  }
+
+  /** What armour does about the blow it just took. Returns damage after it. */
+  procGlyph(p, dmg, from, f) {
+    const a = p.equip.armor;
+    const mark = a.glyph ? GLYPHS[a.glyph] : null;
+    const curse = a.curse ? CURSES[a.curse] : null;
+    let out = dmg;
+
+    if (mark) {
+      if (mark.soak) out = Math.max(1, Math.round(out * (1 - mark.soak)));
+      if (mark.chance && Math.random() < mark.chance) {
+        if (mark.buff && from) this.afflict(from, mark.buff[0], mark.buff[1], 1, f);
+        if (mark.thorns && from) {
+          this.hurtMob(from, Math.max(1, Math.round(dmg * mark.thorns)), 0, f, p);
+          this.fx(f, 'clang', from.x + 8, from.y + 8);
+        }
+        if (mark.knock && from) {
+          const dx = from.x - p.x, dy = from.y - p.y;
+          const d = Math.max(1, Math.hypot(dx, dy));
+          from.knockX = (dx / d) * mark.knock;
+          from.knockY = (dy / d) * mark.knock;
+          from.knockT = 6;
+        }
+        if (mark.recharge) { p.abilityCd = 0; this.afflict(p, B.RECHARGING, 200, 1, f); }
+      }
+      if (!a.known) this.learnGear(p, a, 'armor');
+    }
+
+    if (curse && curse.chance && Math.random() < curse.chance) {
+      if (curse.chill) this.afflict(p, B.SLOW, 160, 1, f);
+      if (curse.hungry) p.hunger = Math.max(0, p.hunger - 220);
+      if (curse.stink) this.cloud(f, p.x + 8, p.y + 8, 40, B.POISON, 200);
+      if (curse.sprout) {
+        const at = tileUnder(p, PLAYER_BOX);
+        if (f.tiles[at] === TT.FLOOR || f.tiles[at] === TT.FLOOR_DECO) f.set(at, TT.HIGH_GRASS);
+      }
+      if (curse.summon) this.spawnRandomMob(f);
+    }
+    return out;
+  }
+
+  /** Wearing something long enough teaches you what is written on it. */
+  learnGear(p, item, which) {
+    if (item.known) return;
+    item.known = true;
+    const word = markName(item);
+    if (word) {
+      this.banner(item.curse
+        ? `THE ${which === 'weapon' ? 'WEAPON' : 'ARMOUR'} IS ${word}`
+        : `IT IS ${word}`, 1800);
+    }
+    this.metaDirty = true;
+  }
+
+  /** Somewhere on this floor a hero could stand. */
+  randomSpot(f) {
+    const pts = f.level.spawnPoints;
+    if (!pts || !pts.length) return null;
+    for (let n = 0; n < 20; n++) {
+      const i = pts[Math.floor(Math.random() * pts.length)];
+      if (passable(f.tiles[i])) return tileToPixel(i, PLAYER_BOX);
+    }
+    return null;
   }
 
   useAbility(p, f) {
@@ -621,7 +786,15 @@ export class Game {
     if (it.type !== ITEM.WEAPON && it.type !== ITEM.ARMOR) return;
     const which = it.type === ITEM.WEAPON ? 'weapon' : 'armor';
     const old = p.equip[which];
-    p.equip[which] = { type: it.type, tier: it.tier, upgrade: it.upgrade || 0 };
+    if (old.cursed) {
+      this.banner(`THE ${which === 'weapon' ? 'WEAPON' : 'ARMOUR'} WILL NOT COME OFF`, 1800);
+      if (!old.known) this.learnGear(p, old, which);
+      return;
+    }
+    p.equip[which] = { ...it };
+    if (p.equip[which].cursed) {
+      this.learnGear(p, p.equip[which], which);
+    }
     p.bag[n] = old ? { key: stackKey(old), item: old, count: 1 } : null;
     const table = it.type === ITEM.WEAPON ? WEAPONS : ARMORS;
     this.fx(this.floor(p.depth), 'equip', p.x + 8, p.y + 8);
@@ -1129,8 +1302,24 @@ export class Game {
 
   /** Lifts a curse from what you are wearing. */
   uncurse(p) {
-    if (p.equip.weapon.cursed) { p.equip.weapon.cursed = false; this.recalc(p); }
-    if (p.equip.armor.cursed) { p.equip.armor.cursed = false; this.recalc(p); }
+    let lifted = 0;
+    for (const which of ['weapon', 'armor']) {
+      const g = p.equip[which];
+      if (!g.cursed && !g.curse) continue;
+      g.cursed = false;
+      g.curse = null;
+      g.known = true;
+      lifted++;
+    }
+    for (const slot of p.bag) {
+      if (!slot?.item?.cursed) continue;
+      slot.item.cursed = false;
+      slot.item.curse = null;
+      slot.item.known = true;
+      lifted++;
+    }
+    this.banner(lifted ? 'THE WEIGHT LIFTS' : 'NOTHING WAS BINDING YOU', 1600);
+    if (lifted) this.recalc(p);
   }
 
   /** Is this thing in the hero's field of view right now? */
@@ -1454,7 +1643,10 @@ export class Game {
       // it cannot see you, but it can hear you moving close by
       for (const p of players) {
         if (p.invis > 0) continue;
-        if (dist2(p.x, p.y, e.x, e.y) < HEARING * HEARING) { e.alerted = 240; break; }
+        // obfuscating armour muffles the wearer's footsteps
+        const gl = p.equip?.armor?.glyph ? GLYPHS[p.equip.armor.glyph] : null;
+        const ear = HEARING * (gl?.quiet ?? 1);
+        if (dist2(p.x, p.y, e.x, e.y) < ear * ear) { e.alerted = 240; break; }
       }
     }
 
