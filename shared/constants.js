@@ -113,6 +113,8 @@ export const HP_PER_LEVEL = 4;
 export const HUNGER_MAX = 5400;       // 3 minutes of walking per ration
 // How much dew a vial holds before it will not take any more.
 export const DEW_MAX = 100;
+// How often the dungeon sends somebody after you on the way back up.
+export const HUNT_EVERY = 600;
 export const HUNGER_HURT = 90;        // ticks between starvation damage
 
 // Input bit flags.

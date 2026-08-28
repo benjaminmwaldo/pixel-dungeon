@@ -6,6 +6,7 @@
 // The Node server and the browser host both drive the same class.
 
 import { Game } from './game.js';
+import { unpackChallenges, packChallenges } from './badges.js';
 import { TICK_MS, MAX_PLAYERS, IN, CLASSES } from './constants.js';
 import { MAX_DEPTH } from './terrain.js';
 
@@ -48,6 +49,7 @@ export class Session {
       t: 'lobby',
       code: this.game.code,
       state: this.game.state,
+      challenges: packChallenges(this.game.challenges),
       players: [...this.game.players.values()].map(p => ({
         id: p.id, name: p.name, cls: p.cls, ready: p.ready,
       })),
@@ -70,6 +72,14 @@ export class Session {
         p.colour = CLASSES[want].colour;
         p.hp = p.maxHp = CLASSES[want].hp;
         game.recalc(p);
+        this.broadcast(this.lobbyPayload());
+        break;
+      }
+      case 'chal': {
+        // only whoever opened the room sets the terms
+        if (!p || p.id !== [...game.players.keys()][0]) return;
+        if (game.state !== 'lobby') return;
+        game.challenges = unpackChallenges(msg.bits | 0);
         this.broadcast(this.lobbyPayload());
         break;
       }
@@ -172,6 +182,8 @@ export class Session {
     return {
       time: Math.round((Date.now() - game.startedAt) / 1000),
       kills: game.kills, deaths: game.deaths, deepest,
+      badges: game.badges || [],
+      challenges: game.challenges || [],
       players: [...game.players.values()].map(x => ({
         name: x.name, cls: x.cls, level: x.level, kills: x.kills, gold: x.gold,
       })),

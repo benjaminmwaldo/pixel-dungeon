@@ -5,7 +5,8 @@
 import {
   TILE, KIND, CLASSES, CLASS_ORDER, PLAYER_BOX, INVULN_TICKS,
   KNOCKBACK_TICKS, KNOCKBACK_SPEED, REVIVE_TICKS, GHOST_TICKS, MAX_PLAYERS,
-  XP_PER_LEVEL, HP_PER_LEVEL, HUNGER_MAX, HUNGER_HURT, DEW_MAX, N, E, S, W, DX, DY,
+  XP_PER_LEVEL, HP_PER_LEVEL, HUNGER_MAX, HUNGER_HURT, DEW_MAX, HUNT_EVERY,
+  N, E, S, W, DX, DY,
   isMob, isBoss, isNpc, rectsOverlap, clamp, dist2,
 } from './constants.js';
 import {
@@ -37,6 +38,9 @@ import {
 } from './artifacts.js';
 import { CHAMPIONS, CHAMP, champChance, rollChampion, champIndex } from './champions.js';
 import { QUEST, QUESTS, QUEST_IDS, QSTATE, questForDepth } from './quests.js';
+import {
+  BADGE, BADGES, BADGE_IDS, CHAL, CHALLENGES, badgeIndex, isHard,
+} from './badges.js';
 import { RINGS, applyRings, RING_LEARN_TICKS } from './rings.js';
 import { computeStats, canTake, clientMods, PERKS } from './perks.js';
 import { toBase64 } from './b64.js';
@@ -91,6 +95,13 @@ export class Game {
     this.app = makeAppearances(this.seed);
     this.known = { potions: [], scrolls: [], rings: [], wands: [] };
     this.artifactsSeen = [];
+    this.badges = [];             // what this run will be remembered for
+    this.challenges = [];         // what it took away to begin with
+    this.brewed = 0;
+    this.sown = 0;
+    this.champsFelled = 0;
+    this.ascending = false;       // carrying it back out
+    this.ascentTimer = 0;
     this.quests = {};             // id -> QSTATE
     this.metaDirty = true;
     this.banners = [];
@@ -201,6 +212,10 @@ export class Game {
       }
     }
 
+    this.stepAscent();
+    if ((this.tick & 63) === 0) {
+      for (const p of this.players.values()) this.checkBadges(p);
+    }
     for (const p of this.players.values()) this.refreshFov(p);
 
     const alive = [...this.players.values()].filter(p => !p.ghost);
@@ -361,6 +376,7 @@ export class Game {
     const st = p.stats;
     const f = this.floor(p.depth);
     dmg *= (p.effects?.taken ?? 1);
+    if (this.hard(CHAL.FRAGILE)) dmg *= 1.5;
     const gear = p.equip.armor;
     const armour = ARMORS[gear.tier - 1].def + gear.upgrade * 1.5 + st.armour;
     p.sinceHit = 0;
@@ -452,7 +468,9 @@ export class Game {
     const reachMult = st.reachMult * (mark?.reach ?? 1);
     const box = meleeBox(p, Math.round(def.reach * reachMult));
     if (!box) return;
-    const base = def.melee + WEAPONS[w.tier - 1].dmg + w.upgrade * 2
+    const bare = this.hard(CHAL.BARE);
+    const base = def.melee + (bare ? WEAPONS[0].dmg : WEAPONS[w.tier - 1].dmg)
+               + (bare ? 0 : w.upgrade * 2)
                + Math.floor(p.level * 0.6) + st.melee;
     for (const e of f.ents) {
       if (e.dead || !isMob(e.kind)) continue;
@@ -1150,6 +1168,7 @@ export class Game {
     const potion = { type: ITEM.POTION, kind };
     if (!this.take(p, f, potion)) this.dropItem(f, tileUnder(p, PLAYER_BOX), potion);
     this.fx(f, 'drink', p.x + 8, p.y + 8);
+    this.brewed++;
     this.banner(same ? 'THE POT GIVES YOU EXACTLY WHAT YOU ASKED FOR'
                      : 'SOMETHING COMES OUT OF THE POT', 1800);
     this.metaDirty = true;
@@ -1169,6 +1188,7 @@ export class Game {
     if (--slot.count <= 0) p.bag[n] = null;
     this.plant(f, spot, kind);
     this.fx(f, 'heal', tx(spot) * TILE + 8, ty(spot) * TILE + 8);
+    this.sown++;
     this.banner(`${PLANTS[kind].name} TAKES ROOT`, 1400);
     this.metaDirty = true;
   }
@@ -1479,6 +1499,7 @@ export class Game {
       this.metaDirty = true;
       return true;
     }
+    if (item.type === ITEM.DEW && this.hard(CHAL.DRY)) return true;
     if (item.type === ITEM.DEW) {
       // a drop mends a little; what you cannot use goes into the vial
       const want = p.maxHp - p.hp;
@@ -1493,8 +1514,11 @@ export class Game {
       return true;
     }
     if (item.type === ITEM.RELIC) {
-      this.state = 'win';
-      this.banner('THE AMULET IS YOURS', 4000);
+      // Twenty-five floors down was the easy half. Everything between here and
+      // the door is awake now, and it knows what you are carrying.
+      this.addToBag(p, { type: ITEM.RELIC });
+      this.earn(BADGE.AMULET);
+      this.beginAscent();
       return true;
     }
     // a scholar knows a rune the moment they see it
@@ -2035,7 +2059,7 @@ export class Game {
     if (it.type === ITEM.KEY || it.type === ITEM.GOLDKEY) return;  // spent on doors
 
     if (it.type === ITEM.FOOD) {
-      p.hunger = HUNGER_MAX;
+      p.hunger = this.hard(CHAL.HUNGRY) ? Math.round(HUNGER_MAX / 2) : HUNGER_MAX;
       this.healPlayer(p, 4);
       this.fx(f, 'eat', p.x + 8, p.y + 8);
     } else if (it.type === ITEM.BOMB) {
@@ -2416,6 +2440,7 @@ export class Game {
     }
     p.depth++;
     this.deepest = Math.max(this.deepest, p.depth);
+    this.earn(BADGE.FIRST_FLOOR);
     const f = this.floor(p.depth);
     const spot = tileToPixel(f.level.entrance, PLAYER_BOX);
     p.x = spot.x; p.y = spot.y;
@@ -2429,8 +2454,96 @@ export class Game {
     this.metaDirty = true;
   }
 
+  /** The amulet is out of its case. Wake the whole dungeon up. */
+  beginAscent() {
+    if (this.ascending) return;
+    this.ascending = true;
+    this.ascentTimer = HUNT_EVERY;
+    // every floor you already cleared fills back up, worse than it was
+    for (const f of this.floors.values()) {
+      f.populated = false;
+      f.active = false;
+      f.spawnTimer = 60;
+    }
+    this.banner('THE AMULET IS YOURS. NOW CARRY IT OUT', 4200);
+    this.metaDirty = true;
+  }
+
+  /** Note something worth remembering. Says so once, and only once. */
+  earn(id) {
+    if (!BADGES[id] || this.badges.includes(id)) return;
+    this.badges.push(id);
+    this.banner(`BADGE - ${BADGES[id].name}`, 2200);
+    if (isHard(this.challenges)) this.earn(BADGE.DEFIANT);
+    this.metaDirty = true;
+  }
+
+  /** Is this challenge on for this run? */
+  hard(id) { return this.challenges.includes(id); }
+
+  /** Everything worth noticing about the state of a hero, checked now and then. */
+  checkBadges(p) {
+    if (p.gold >= 1000) this.earn(BADGE.RICH);
+    if (p.bag.length && p.bag.every(Boolean)) this.earn(BADGE.HOARDER);
+    if ((p.equip.weapon.upgrade || 0) >= 5 || (p.equip.armor.upgrade || 0) >= 5) {
+      this.earn(BADGE.ARMED);
+    }
+    if (this.known.potions.length + this.known.scrolls.length >= 10) {
+      this.earn(BADGE.SCHOLAR);
+    }
+    if (this.brewed >= 5) this.earn(BADGE.ALCHEMIST);
+    if (this.sown >= 10) this.earn(BADGE.GARDENER);
+    if (this.champsFelled >= 10) this.earn(BADGE.CHAMPION);
+    const done = QUEST_IDS.filter(id => this.quests[id] === QSTATE.DONE).length;
+    if (done >= 1) this.earn(BADGE.FAVOUR);
+    if (done === QUEST_IDS.length) this.earn(BADGE.ALL_FAVOURS);
+  }
+
+  /** Is anybody in the party actually holding the thing? */
+  hasAmulet() {
+    for (const p of this.players.values()) {
+      if (p.bag.some(s => s?.item?.type === ITEM.RELIC)) return true;
+    }
+    return false;
+  }
+
+  /** On the way up, the dungeon keeps sending somebody after you. */
+  stepAscent() {
+    if (!this.ascending || this.state !== 'play') return;
+    if (--this.ascentTimer > 0) return;
+    this.ascentTimer = HUNT_EVERY;
+    for (const f of this.floors.values()) {
+      if (!f.active) continue;
+      const players = this.livingOn(f.depth);
+      if (!players.length) continue;
+      // whatever it sends has to be able to come looking, so nothing rooted
+      // and nothing harmless
+      const table = SPAWNS[regionOf(Math.max(f.depth, 16)).key]
+        .filter(k => !MOBS[k].rooted && !MOBS[k].harmless);
+      if (!table.length) continue;
+      const kind = table[f.rng.int(table.length)];
+      const pts = f.level.spawnPoints;
+      if (!pts.length) continue;
+      const spot = tileToPixel(pts[f.rng.int(pts.length)], MOBS[kind].box);
+      const m = this.spawnMob(f, kind, spot.x, spot.y,
+        { champion: rollChampion(25, f.rng) });
+      if (m) m.alerted = 3000;
+      this.fx(f, 'summon', spot.x + 8, spot.y + 8);
+    }
+    this.banner('SOMETHING ELSE HAS COME LOOKING', 1800);
+  }
+
   ascend(p) {
-    if (p.depth <= 1) return;
+    if (p.depth <= 1) {
+      // the way out, if you have what you came for
+      if (this.ascending && this.hasAmulet()) {
+        this.earn(BADGE.ASCENDED);
+        this.state = 'win';
+        this.banner('OUT, AND STILL HOLDING IT', 4000);
+        this.metaDirty = true;
+      }
+      return;
+    }
     p.depth--;
     const f = this.floor(p.depth);
     const spot = tileToPixel(f.level.exit, PLAYER_BOX);
@@ -2464,7 +2577,9 @@ export class Game {
     f.feeling = this.rollFeeling(f);
     f.feelingIn = 100;   // let the floor-name banner land first
 
-    const budget = Math.round(mobBudget(f.depth) * (f.feeling === 'dangerous' ? 1.6 : 1));
+    let budget = Math.round(mobBudget(f.depth) * (f.feeling === 'dangerous' ? 1.6 : 1));
+    if (this.ascending) budget = Math.round(budget * 1.8);
+    if (this.hard(CHAL.SWARM)) budget = Math.round(budget * 1.5);
     for (let n = 0; n < budget; n++) this.spawnRandomMob(f);
 
     let drops = 5 + f.rng.int(4);
@@ -3282,6 +3397,11 @@ export class Game {
     e.dead = true;
     this.kills++;
     const st = MOBS[e.kind];
+    if (byPlayer && !isNpc(e.kind)) this.earn(BADGE.FIRST_BLOOD);
+    if (e.champ) {
+      this.champsFelled++;
+      if (this.champsFelled >= 10) this.earn(BADGE.CHAMPION);
+    }
 
     // Somebody may be waiting on this one. Count it before anything below can
     // return early — a monster that splits or a boss both leave by other doors.
@@ -3305,6 +3425,11 @@ export class Game {
 
     if (isBoss(e.kind)) {
       f.bossDead = true;
+      this.earn({
+        [KIND.BOSS_GLUT]: BADGE.SEWERS, [KIND.BOSS_WARDEN]: BADGE.PRISON,
+        [KIND.BOSS_TYRANT]: BADGE.CAVES, [KIND.BOSS_KING]: BADGE.CITY,
+        [KIND.BOSS_UNSLEEPING]: BADGE.HALLS,
+      }[e.kind]);
       this.banner(`${st.name} FALLS`, 3000);
       for (let i = 0; i < LEVEL_LEN; i++) {
         if (f.tiles[i] === TT.LOCKED_EXIT) f.set(i, TT.EXIT);
@@ -3347,7 +3472,7 @@ export class Game {
     const here = tileUnder(p, PLAYER_BOX);
     if (here === p.fovTile) return;
     p.fovTile = here;
-    const gloom = f.feeling === 'dark' ? 3 : 0;
+    const gloom = (f.feeling === 'dark' ? 3 : 0) + (this.hard(CHAL.BLIND) ? 3 : 0);
     const sight = Math.max(2,
       CLASSES[p.cls].sight + p.stats.sight + (p.effects?.sight || 0) - gloom);
     viewFrom(f.level, here, sight, p.fov);
@@ -3382,6 +3507,9 @@ export class Game {
     this.app = makeAppearances(this.seed);
     this.known = { potions: [], scrolls: [], rings: [], wands: [] };
     this.artifactsSeen = [];
+    this.ascending = false;
+    this.ascentTimer = 0;
+    this.quests = {};
     this.floors.clear();
     this.kills = 0; this.deaths = 0; this.deepest = 1;
     for (const p of this.players.values()) {
@@ -3492,6 +3620,9 @@ export class Game {
     return {
       t: 'm',
       state: this.state,
+      ascending: this.ascending,
+      badges: this.badges,
+      challenges: this.challenges,
       known: this.known,
       app: this.app,
       deepest: this.deepest,

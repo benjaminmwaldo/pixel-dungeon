@@ -10,6 +10,7 @@ import { TT, regionOf, LEVEL_W, LEVEL_H } from '../shared/terrain.js';
 import { drawInventory, drawPerks, moveNode, firstNode, WORN_SLOTS } from './screens.js';
 const WORN = WORN_SLOTS.length;
 import { treesFor } from '../shared/perks.js';
+import { CHAL_IDS } from '../shared/badges.js';
 import { Host, joinAsGuest, socketTransport, makeCode, friendlyError } from './peer.js';
 
 const canvas = document.getElementById('screen');
@@ -48,6 +49,9 @@ const net = new Net({
   onLobby(m) {
     ui.players = m.players;
     ui.code = m.code;
+    ui.challenges = m.challenges || 0;
+    ui.host = m.players[0]?.id === net.id;
+    ui.chalCursor ??= 0;
     const me = m.players.find(p => p.id === net.id);
     myReady = !!me?.ready;
     if (mode !== 'play') mode = 'lobby';
@@ -200,6 +204,20 @@ function titleKeys(ev) {
 }
 
 function lobbyKeys(ev) {
+  // only whoever opened the room sets the terms
+  if (ui.host) {
+    const n = CHAL_IDS.length;
+    if (ev.type === 'left') { ui.chalCursor = (ui.chalCursor + n - 1) % n; audio.sfx('menu'); return; }
+    if (ev.type === 'right') { ui.chalCursor = (ui.chalCursor + 1) % n; audio.sfx('menu'); return; }
+    if (ev.type === 'up') { ui.chalCursor = (ui.chalCursor + n - 3) % n; audio.sfx('menu'); return; }
+    if (ev.type === 'down') { ui.chalCursor = (ui.chalCursor + 3) % n; audio.sfx('menu'); return; }
+    if (ev.type === 'b') {
+      ui.challenges ^= 1 << ui.chalCursor;
+      net.setChallenges(ui.challenges);
+      audio.sfx('select');
+      return;
+    }
+  }
   if (ev.type === 'start') {
     myReady = !myReady;
     net.ready(myReady);
@@ -377,6 +395,7 @@ function promptForTile(st) {
   const t = net.tileHere();
   if (t === TT.EXIT) renderer.prompt('E - DESCEND');
   else if (t === TT.ENTRANCE && net.depth > 1) renderer.prompt('E - CLIMB BACK UP');
+  else if (t === TT.ENTRANCE && st.ascending) renderer.prompt('E - OUT, WITH IT');
   else if (t === TT.LOCKED_EXIT) renderer.prompt('SEALED UNTIL THE BOSS FALLS');
   else if (t === TT.WELL) renderer.prompt('E - DRINK');
   else if (t === TT.PEDESTAL) renderer.prompt('E - TAKE IT');

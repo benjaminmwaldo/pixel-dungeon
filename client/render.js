@@ -16,6 +16,9 @@ import { WAND_TINT } from '../shared/wands.js';
 import { PLANTS, plantById } from '../shared/plants.js';
 import { MOBS } from '../shared/mobs.js';
 import { CHAMPIONS, champById } from '../shared/champions.js';
+import {
+  BADGES, BADGE_IDS, CHALLENGES, CHAL_IDS, unpackChallenges,
+} from '../shared/badges.js';
 import { BUFFS } from '../shared/buffs.js';
 import { TRAPS, trapById } from '../shared/traps.js';
 import {
@@ -389,7 +392,8 @@ export class Renderer {
 
     const region = regionOf(st.depth);
     const me = st.me;
-    text(g, `FLOOR ${String(st.depth).padStart(2, '0')}`, 42, 3, 'gold', 7);
+    text(g, `FLOOR ${String(st.depth).padStart(2, '0')}`, 42, 3,
+      st.ascending ? 'red' : 'gold', 7);
     text(g, region.name, 42, 12, 'grey', 6);
 
     const hpFrac = Math.max(0, me.hp / Math.max(1, me.maxHp));
@@ -654,8 +658,25 @@ export class Renderer {
       text(g, p.ready ? 'READY' : '...', 218, y, p.ready ? 'green' : 'grey', 7);
     });
 
-    textCentered(g, 'C CHANGES CLASS   ENTER WHEN READY', SCREEN_W / 2, 192, 'white', 7);
-    textCentered(g, 'THE DUNGEON OPENS WHEN ALL ARE READY', SCREEN_W / 2, 208, 'grey', 6);
+    // whoever opened the room sets the terms
+    const on = unpackChallenges(ui.challenges || 0);
+    text(g, 'CHALLENGES', 20, 152, 'grey', 6);
+    CHAL_IDS.forEach((id, i) => {
+      const x = 20 + (i % 3) * 96, y = 162 + Math.floor(i / 3) * 11;
+      const lit = on.includes(id);
+      const sel = ui.host && ui.chalCursor === i;
+      text(g, `${lit ? '[X]' : '[ ]'} ${CHALLENGES[id].name}`, x, y,
+        lit ? 'red' : sel ? 'white' : 'dark', 5);
+      if (sel) text(g, '>', x - 7, y, 'gold', 5);
+    });
+    if (ui.host) {
+      const hover = CHALLENGES[CHAL_IDS[ui.chalCursor || 0]];
+      text(g, hover ? hover.blurb : '', 20, 186, 'grey', 5);
+      textCentered(g, 'ARROWS AND X SET CHALLENGES', SCREEN_W / 2, 196, 'grey', 5);
+    }
+
+    textCentered(g, 'C CHANGES CLASS   ENTER WHEN READY', SCREEN_W / 2, 206, 'white', 6);
+    textCentered(g, 'THE DUNGEON OPENS WHEN ALL ARE READY', SCREEN_W / 2, 216, 'grey', 5);
   }
 
   drawEnd(stats, won) {
@@ -664,26 +685,48 @@ export class Renderer {
     this.frameBox();
     if (won) {
       blit(g, IMG.AMULET, SCREEN_W / 2 - 8, 24);
-      textCentered(g, 'THE AMULET IS YOURS', SCREEN_W / 2, 46, 'gold');
-      textCentered(g, 'THE DUNGEON IS BEATEN', SCREEN_W / 2, 60, 'grey', 7);
+      textCentered(g, 'OUT, AND STILL HOLDING IT', SCREEN_W / 2, 46, 'gold');
+      textCentered(g, 'TWENTY-FIVE DOWN AND TWENTY-FIVE BACK', SCREEN_W / 2, 60, 'grey', 6);
     } else {
       textCentered(g, 'THE PARTY HAS FALLEN', SCREEN_W / 2, 40, 'red');
       textCentered(g, 'THE DUNGEON KEEPS WHAT IT TAKES', SCREEN_W / 2, 56, 'grey', 7);
     }
 
+    if ((stats.challenges || []).length) {
+      textCentered(g, `UNDER ${stats.challenges.length} CHALLENGE${
+        stats.challenges.length > 1 ? 'S' : ''}`, SCREEN_W / 2, 70, 'red', 6);
+    }
+
+    // Two columns: how the run went on the left, what it is remembered for on
+    // the right, so a full party and a full sheet of badges both fit.
     const mm = String(Math.floor(stats.time / 60)).padStart(2, '0');
     const ss = String(stats.time % 60).padStart(2, '0');
-    text(g, `DEEPEST FLOOR  ${String(stats.deepest).padStart(2, '0')}`, 80, 82, 'white', 7);
-    text(g, `TIME           ${mm}:${ss}`, 80, 94, 'white', 7);
-    text(g, `SLAIN          ${String(stats.kills).padStart(3, '0')}`, 80, 106, 'white', 7);
-    text(g, `FALLEN         ${String(stats.deaths).padStart(3, '0')}`, 80, 118, 'white', 7);
+    const LX = 28;
+    text(g, `DEEPEST  ${String(stats.deepest).padStart(2, '0')}`, LX, 84, 'white', 6);
+    text(g, `TIME     ${mm}:${ss}`, LX, 94, 'white', 6);
+    text(g, `SLAIN    ${String(stats.kills).padStart(3, '0')}`, LX, 104, 'white', 6);
+    text(g, `FALLEN   ${String(stats.deaths).padStart(3, '0')}`, LX, 114, 'white', 6);
 
     (stats.players || []).forEach((p, i) => {
-      const y = 138 + i * 16;
-      blit(g, HERO_IMG[p.cls]?.HERO_S1, 74, y - 4);
-      text(g, `${p.name} LV${String(p.level).padStart(2, '0')} ${String(p.kills).padStart(3, '0')} SLAIN`,
-        94, y, 'white', 6);
+      const y = 132 + i * 16;
+      blit(g, HERO_IMG[p.cls]?.HERO_S1, LX - 6, y - 4);
+      text(g, `${p.name} LV${String(p.level).padStart(2, '0')}`, LX + 14, y, 'white', 6);
+      text(g, `${String(p.kills).padStart(3, '0')} SLAIN`, LX + 14, y + 8, 'grey', 5);
     });
+
+    const badges = stats.badges || [];
+    const RX = 164;
+    text(g, `BADGES  ${badges.length}/${BADGE_IDS.length}`, RX, 84, 'gold', 6);
+    if (!badges.length) {
+      text(g, 'NONE THIS TIME', RX, 96, 'dark', 5);
+    } else {
+      badges.slice(0, 12).forEach((id, i) => {
+        text(g, BADGES[id]?.name || id, RX, 96 + i * 9, 'white', 5);
+      });
+      if (badges.length > 12) {
+        text(g, `AND ${badges.length - 12} MORE`, RX, 96 + 12 * 9, 'grey', 5);
+      }
+    }
 
     textCentered(g, 'PRESS ENTER TO DELVE AGAIN', SCREEN_W / 2, 212, 'gold', 7);
   }

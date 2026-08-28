@@ -78,6 +78,7 @@ export class Net {
   join(code, name, cls) { this.send({ t: 'join', code, name, cls }); }
   chooseClass(cls) { this.send({ t: 'class', cls }); }
   ready(v) { this.send({ t: 'ready', v }); }
+  setChallenges(bits) { this.send({ t: 'chal', bits }); }
   act() { this.send({ t: 'act' }); }
   useSlot(n) { this.send({ t: 'use', n }); }
   invOp(op, a, b = 0) { this.send({ t: 'inv', op, a, b }); }
@@ -135,6 +136,9 @@ export class Net {
 
   onMeta(m) {
     this.known = m.known;
+    this.ascending = !!m.ascending;
+    this.badges = m.badges || [];
+    this.challenges = m.challenges || [];
     this.app = m.app;
     this.serverState = m.state;
     this.roster = new Map(m.players.map(p => [p.id, p]));
@@ -303,6 +307,9 @@ export class Net {
       perkPoints: this.livePoints ?? this.perkPoints,
       app: this.app,
       known: this.known,
+      ascending: this.ascending,
+      badges: this.badges || [],
+      challenges: this.challenges || [],
       particles: [],
     };
   }

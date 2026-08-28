@@ -116,19 +116,32 @@ the blacksmith and the ambitious imp, one per chapter, each asking once per run.
 No dialogue tree — you press the same key you press for everything else. The rat
 king was dropped; the sheep already wanders.
 
-## Wave 5 — the long tail — **next**
+## Wave 5 — the long tail — **done**
 
-**Alchemy.** A pot in the laboratory: seeds into potions, potions into exotic
-potions, scrolls into exotic scrolls, plus bombs and elixirs.
+**Alchemy** — *shipped.* A pot in the middle of every laboratory. Three seeds
+in, one potion out: three of a kind gives you exactly what that seed makes, a
+mixed handful gives you one of the three at random. Exotic potions and elixirs
+were dropped — the gamble is the interesting part, and it is already there.
 
-**Seeds and plants** (13). Firebloom, icecap, sorrowmoss, blindweed, sungrass,
-fadeleaf, earthroot, rotberry, starflower, swiftthistle, stormvine, mageroyal,
-blandfruit — each triggered by stepping on it or thrown as a seed.
+**Seeds and plants** — *shipped: all 13.* A plant does nothing until something
+stands on it, which cuts both ways — a sorrowmoss under a charging brute is
+worth far more than one under your own feet. Seeds are sown a tile ahead of
+you, which is the point. Gardens grow them on their own.
 
-**Dew drops and the dew vial.**
+**Dew drops and the dew vial** — *shipped.* Most things leave a drop. It mends
+you a little when you are hurt and goes into the vial when you are whole; the
+vial can be tipped out later, and reads on the status bar next to the purse.
 
-**Badges**, **challenges** (run modifiers), and the **ascension** — carrying the
-amulet back up through twenty-five floors of everything that is now awake.
+**Badges** — *shipped: 20.* Earned in play and listed on the end screen.
+
+**Challenges** — *shipped: six.* Set in the lobby by whoever opened the room.
+On empty, bare handed, in the dark, thin skinned, swarm, dry. Doing anything at
+all under one is itself worth a badge.
+
+**The ascension** — *shipped.* Taking the amulet no longer ends the run: it
+wakes the whole dungeon. Every floor you already cleared fills back up with
+half again as many, and something champion-grade comes looking for you every
+twenty seconds. You win by walking out of the top with it still in your pack.
 
 ---
 

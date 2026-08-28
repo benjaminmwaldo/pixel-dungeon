@@ -9,114 +9,89 @@ def edit(path, *pairs):
     io.open(path, 'w', encoding='utf-8', newline='\n').write(s)
     print('  patched', path)
 
-edit('shared/constants.js',
-  ("  ITEM: 80, BOMB: 81, BLAST: 82, POOF: 83, GAS: 84, WARD: 85, THROWN: 86,\n  SPIRIT: 87,",
-   "  ITEM: 80, BOMB: 81, BLAST: 82, POOF: 83, GAS: 84, WARD: 85, THROWN: 86,\n  SPIRIT: 87, PLANT: 88,"))
-
-edit('shared/items.js',
-  ("  ARTIFACT: 'artifact', QUEST: 'quest',\n};",
-   "  ARTIFACT: 'artifact', QUEST: 'quest', SEED: 'seed',\n};"),
-  ("import { MISSILES, rollMissile } from './missiles.js';",
-   "import { MISSILES, rollMissile } from './missiles.js';\nimport { PLANTS, rollSeed } from './plants.js';"),
-  ("    case ITEM.QUEST: return item.name || 'SOMETHING SOMEBODY WANTS';",
-   """    case ITEM.SEED: {
-      const def = PLANTS[item.kind];
-      const n = item.amount || 1;
-      const word = `${def ? def.name : 'PLAIN'} SEED`;
-      return n > 1 ? `${n} ${word}S` : word;
-    }
-    case ITEM.QUEST: return item.name || 'SOMETHING SOMEBODY WANTS';"""),
-  ("         item.type === ITEM.KEY || item.type === ITEM.GOLDKEY ||\n         item.type === ITEM.MISSILE;",
-   "         item.type === ITEM.KEY || item.type === ITEM.GOLDKEY ||\n         item.type === ITEM.MISSILE || item.type === ITEM.SEED;"),
-  ("  if (item.type === ITEM.MISSILE) return `missile:${item.kind}`;",
-   "  if (item.type === ITEM.MISSILE) return `missile:${item.kind}`;\n  if (item.type === ITEM.SEED) return `seed:${item.kind}`;"),
-  ("  if (r < 0.84) return rollMissile(depth, rng);",
-   "  if (r < 0.81) return rollMissile(depth, rng);\n  if (r < 0.84) return rollSeed(depth, rng);"),
-  ("    case ITEM.MISSILE: return (MISSILES[item.kind]?.dmg || 3) * 5 * (item.amount || 1);",
-   "    case ITEM.SEED: return 30 * (item.amount || 1);\n    case ITEM.MISSILE: return (MISSILES[item.kind]?.dmg || 3) * 5 * (item.amount || 1);"))
-
 edit('shared/game.js',
-  ("import { rollRing } from './rings.js';",
-   "import { rollRing } from './rings.js';\nimport { PLANTS, PLANT, PLANT_IDS, rollPlant, plantIndex } from './plants.js';"),
+  ("import { QUEST, QUESTS, QUEST_IDS, QSTATE, questForDepth } from './quests.js';",
+   "import { QUEST, QUESTS, QUEST_IDS, QSTATE, questForDepth } from './quests.js';\nimport {\n  BADGE, BADGES, BADGE_IDS, CHAL, CHALLENGES, badgeIndex, isHard,\n} from './badges.js';"),
 
-  # sowing one from the pack
-  ("    if (it.type === ITEM.MISSILE) { this.throwMissile(p, f, n); return; }",
-   "    if (it.type === ITEM.MISSILE) { this.throwMissile(p, f, n); return; }\n    if (it.type === ITEM.SEED) { this.sow(p, f, n); return; }"),
+  ("    this.ascending = false;       // carrying it back out",
+   "    this.badges = [];             // what this run will be remembered for\n    this.challenges = [];         // what it took away to begin with\n    this.brewed = 0;\n    this.sown = 0;\n    this.champsFelled = 0;\n    this.ascending = false;       // carrying it back out"),
 )
 
 edit('shared/game.js',
-  ("""  /** The nearest monster roughly in front of the hero. */""",
-   """  /** Put a seed in the ground one tile ahead of you. */
-  sow(p, f, n) {
-    const slot = p.bag[n];
-    if (!slot) return;
-    const kind = slot.item.kind;
-    const dx = DX[p.dir], dy = DY[p.dir];
-    const at = tileUnder({ x: p.x + dx * TILE, y: p.y + dy * TILE }, PLAYER_BOX);
-    const here = tileUnder(p, PLAYER_BOX);
-    const spot = this.sowable(f, at) ? at : this.sowable(f, here) ? here : null;
-    if (spot === null) { this.banner('NOTHING WILL TAKE ROOT THERE', 1300); return; }
-
-    if (--slot.count <= 0) p.bag[n] = null;
-    this.plant(f, spot, kind);
-    this.fx(f, 'heal', tx(spot) * TILE + 8, ty(spot) * TILE + 8);
-    this.banner(`${PLANTS[kind].name} TAKES ROOT`, 1400);
+  ("""  /** Is anybody in the party actually holding the thing? */""",
+   """  /** Note something worth remembering. Says so once, and only once. */
+  earn(id) {
+    if (!BADGES[id] || this.badges.includes(id)) return;
+    this.badges.push(id);
+    this.banner(`BADGE - ${BADGES[id].name}`, 2200);
+    if (isHard(this.challenges)) this.earn(BADGE.DEFIANT);
     this.metaDirty = true;
   }
 
-  /** Will anything grow on this tile? */
-  sowable(f, i) {
-    if (i === null || i === undefined) return false;
-    const t = f.tiles[i];
-    if (t !== TT.FLOOR && t !== TT.FLOOR_DECO && t !== TT.GRASS && t !== TT.EMBERS) return false;
-    return !f.ents.some(e => !e.dead && e.kind === KIND.PLANT && tileUnder(e, e.box) === i);
+  /** Is this challenge on for this run? */
+  hard(id) { return this.challenges.includes(id); }
+
+  /** Everything worth noticing about the state of a hero, checked now and then. */
+  checkBadges(p) {
+    if (p.gold >= 1000) this.earn(BADGE.RICH);
+    if (p.bag.length && p.bag.every(Boolean)) this.earn(BADGE.HOARDER);
+    if ((p.equip.weapon.upgrade || 0) >= 5 || (p.equip.armor.upgrade || 0) >= 5) {
+      this.earn(BADGE.ARMED);
+    }
+    if (this.known.potions.length + this.known.scrolls.length >= 10) {
+      this.earn(BADGE.SCHOLAR);
+    }
+    if (this.brewed >= 5) this.earn(BADGE.ALCHEMIST);
+    if (this.sown >= 10) this.earn(BADGE.GARDENER);
+    if (this.champsFelled >= 10) this.earn(BADGE.CHAMPION);
+    const done = QUEST_IDS.filter(id => this.quests[id] === QSTATE.DONE).length;
+    if (done >= 1) this.earn(BADGE.FAVOUR);
+    if (done === QUEST_IDS.length) this.earn(BADGE.ALL_FAVOURS);
   }
 
-  /** Grow one, wherever it came from. */
-  plant(f, tile, kind) {
-    const px = tileToPixel(tile, { x: 4, y: 4, w: 8, h: 8 });
-    const e = {
-      id: this.entSeq++, kind: KIND.PLANT, x: px.x, y: px.y, dir: 0,
-      box: { x: 4, y: 4, w: 8, h: 8 }, t: 0, plant: kind,
-    };
-    f.ents.push(e);
-    return e;
-  }
+  /** Is anybody in the party actually holding the thing? */"""),
+)
 
-  /** Something stood on it. It does its one thing and is gone. */
-  trample(e, f, who, isHero) {
-    const def = PLANTS[e.plant];
-    if (!def) { e.dead = true; return; }
+# --- the moments worth a badge ---------------------------------------------
+edit('shared/game.js',
+  ("""  killMob(e, f, byPlayer) {
     e.dead = true;
-    const x = e.x + 8, y = e.y + 8;
-    this.fx(f, 'poof', x, y);
-    this.banner(def.name, 1200);
+    this.kills++;
+    const st = MOBS[e.kind];""",
+   """  killMob(e, f, byPlayer) {
+    e.dead = true;
+    this.kills++;
+    const st = MOBS[e.kind];
+    if (byPlayer && !isNpc(e.kind)) this.earn(BADGE.FIRST_BLOOD);
+    if (e.champ) {
+      this.champsFelled++;
+      if (this.champsFelled >= 10) this.earn(BADGE.CHAMPION);
+    }"""),
 
-    if (def.buff) this.afflict(who, def.buff[0], def.buff[1], 1, f);
-    if (def.cloud) this.cloud(f, x, y, def.cloud[2], def.cloud[0], def.cloud[1], null);
-    if (def.teleport && isHero) {
-      const spot = this.randomSpot(f);
-      if (spot) { who.x = spot.x; who.y = spot.y; who.fovTile = -1; }
-      this.fx(f, 'teleport', who.x + 8, who.y + 8);
-    } else if (def.teleport) {
-      const spot = this.randomSpot(f);
-      if (spot) { who.x = spot.x; who.y = spot.y; }
-    }
-    if (def.shout) {
-      for (const o of f.ents) {
-        if (o.dead || !isMob(o.kind) || isNpc(o.kind)) continue;
-        o.alerted = def.shout;
-      }
-    }
-    if (def.feeds && isHero) {
-      who.hunger = HUNGER_MAX;
-      this.healPlayer(who, 3);
-      this.fx(f, 'eat', x, y);
-    }
-    this.metaDirty = true;
-  }
+  ("""    if (isBoss(e.kind)) {
+      f.bossDead = true;""",
+   """    if (isBoss(e.kind)) {
+      f.bossDead = true;
+      this.earn({
+        [KIND.BOSS_GLUT]: BADGE.SEWERS, [KIND.BOSS_WARDEN]: BADGE.PRISON,
+        [KIND.BOSS_TYRANT]: BADGE.CAVES, [KIND.BOSS_KING]: BADGE.CITY,
+        [KIND.BOSS_UNSLEEPING]: BADGE.HALLS,
+      }[e.kind]);"""),
 
-  /** The nearest monster roughly in front of the hero. */"""),
+  ("""    this.addToBag(p, { type: ITEM.RELIC });
+      this.beginAscent();""",
+   """    this.addToBag(p, { type: ITEM.RELIC });
+      this.earn(BADGE.AMULET);
+      this.beginAscent();"""),
+
+  ("""      if (this.ascending && this.hasAmulet()) {
+        this.state = 'win';""",
+   """      if (this.ascending && this.hasAmulet()) {
+        this.earn(BADGE.ASCENDED);
+        this.state = 'win';"""),
+
+  ("    this.deepest = Math.max(this.deepest, p.depth);",
+   "    this.deepest = Math.max(this.deepest, p.depth);\n    this.earn(BADGE.FIRST_FLOOR);"),
 )
 
 print('done')
