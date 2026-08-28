@@ -6,8 +6,9 @@ import { SCREEN_W, SCREEN_H, CLASSES, CLASS_ORDER } from '../shared/constants.js
 import { ITEM, POTION_TINT, WEAPONS, ARMORS, itemLabel, isConsumable } from '../shared/items.js';
 import { ENCHANTS, GLYPHS, CURSES } from '../shared/enchants.js';
 import { RINGS, RING_TINT } from '../shared/rings.js';
+import { WANDS, WAND_TINT } from '../shared/wands.js';
 import { TREES, PERKS, perksInTree, treesFor, canTake } from '../shared/perks.js';
-import { IMG, blit, text, textCentered, textWidth, potionImg, ringImg } from './art/bake.js';
+import { IMG, blit, text, textCentered, textWidth, potionImg, ringImg, wandImg } from './art/bake.js';
 
 const C = {
   panel: '#0B0E18', frame: '#39405C', dim: '#1A2032',
@@ -42,6 +43,8 @@ export function iconFor(item, st) {
       return potionImg(POTION_TINT[st.app?.potionLook?.[item.kind]] || '#FCFCFC');
     case ITEM.RING:
       return ringImg(RING_TINT[st.app?.ringLook?.[item.kind]] || '#FCFCFC');
+    case ITEM.WAND:
+      return wandImg(WAND_TINT[st.app?.wandLook?.[item.kind]] || '#FCFCFC');
     default: return null;
   }
 }
@@ -106,6 +109,13 @@ function describe(item, st, short = false) {
     case ITEM.SCROLL:
       return st.known?.scrolls?.includes(item.kind)
         ? scrollText(item.kind) : 'THE RUNE MEANS NOTHING TO YOU YET';
+    case ITEM.WAND: {
+      const def = WANDS[item.kind];
+      const max = (def?.max || 0) + (item.upgrade || 0);
+      const charge = `${item.charges ?? 0}/${max} CHARGES`;
+      const shown = item.known || st.known?.wands?.includes(item.kind);
+      return shown ? `${charge}  -  ${def.blurb}` : `${charge}  -  UNTRIED`;
+    }
     case ITEM.RING: {
       const shown = item.known || st.known?.rings?.includes(item.kind);
       if (!shown) return 'YOU HAVE NOT WORN IT LONG ENOUGH';
@@ -226,6 +236,9 @@ function actionHint(item, ui) {
   if (ui.held !== null) return 'C AGAIN TO PLACE IT';
   if (item.type === ITEM.WEAPON || item.type === ITEM.ARMOR) return 'ENTER TO WEAR IT';
   if (item.type === ITEM.KEY || item.type === ITEM.GOLDKEY) return 'USED BY WALKING INTO A LOCKED DOOR';
+  if (item.type === ITEM.WAND) {
+    return (item.charges ?? 0) > 0 ? 'ENTER TO POINT IT WHERE YOU FACE' : 'SPENT - IT WILL FILL BACK UP';
+  }
   return 'ENTER TO USE IT';
 }
 

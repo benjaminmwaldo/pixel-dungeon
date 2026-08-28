@@ -5,11 +5,12 @@
 import { rngFor } from './terrain.js';
 import { dressGear, markName } from './enchants.js';
 import { RINGS, RING_IDS, RING_LOOKS, rollRing } from './rings.js';
+import { WANDS, WAND_IDS, WAND_LOOKS, rollWand } from './wands.js';
 
 export const ITEM = {
   GOLD: 'gold', FOOD: 'food', POTION: 'potion', SCROLL: 'scroll',
   WEAPON: 'weapon', ARMOR: 'armor', KEY: 'key', GOLDKEY: 'goldkey',
-  BOMB: 'bomb', RELIC: 'relic', RING: 'ring',
+  BOMB: 'bomb', RELIC: 'relic', RING: 'ring', WAND: 'wand',
 };
 
 // The twelve the original carries.
@@ -63,11 +64,13 @@ export function makeAppearances(seed) {
   const pots = rng.shuffle(POTION_LOOKS.slice());
   const scrs = rng.shuffle(SCROLL_LOOKS.slice());
   const rngs = rng.shuffle(RING_LOOKS.slice());
-  const potionLook = {}, scrollLook = {}, ringLook = {};
+  const wnds = rng.shuffle(WAND_LOOKS.slice());
+  const potionLook = {}, scrollLook = {}, ringLook = {}, wandLook = {};
   POTION_KINDS.forEach((k, i) => { potionLook[k] = pots[i % pots.length]; });
   SCROLL_KINDS.forEach((k, i) => { scrollLook[k] = scrs[i % scrs.length]; });
   RING_IDS.forEach((k, i) => { ringLook[k] = rngs[i % rngs.length]; });
-  return { potionLook, scrollLook, ringLook };
+  WAND_IDS.forEach((k, i) => { wandLook[k] = wnds[i % wnds.length]; });
+  return { potionLook, scrollLook, ringLook, wandLook };
 }
 
 /** What the party should see this item called, given what they have learned. */
@@ -95,6 +98,13 @@ export function itemLabel(item, app, known) {
       return known.scrolls.includes(item.kind)
         ? `SCROLL OF ${item.kind.toUpperCase()}`
         : `SCROLL "${app.scrollLook[item.kind]}"`;
+    case ITEM.WAND: {
+      const plus = item.upgrade ? `+${item.upgrade} ` : '';
+      if (!item.known && !known.wands?.includes(item.kind)) {
+        return `${app.wandLook?.[item.kind] || 'PLAIN'} WAND`;
+      }
+      return `${plus}WAND OF ${WANDS[item.kind].name}`;
+    }
     case ITEM.RING: {
       const plus = item.upgrade ? `+${item.upgrade} ` : '';
       if (!item.known && !known.rings?.includes(item.kind)) {
@@ -121,6 +131,11 @@ export function isConsumable(item) {
          item.type === ITEM.KEY || item.type === ITEM.GOLDKEY;
 }
 
+/** Kept in the quick bar and pointed, but never used up. */
+export function isPointed(item) {
+  return item?.type === ITEM.WAND;
+}
+
 /** Something you put on rather than use up. */
 export function isWorn(item) {
   return item?.type === ITEM.WEAPON || item?.type === ITEM.ARMOR ||
@@ -131,6 +146,7 @@ export function isWorn(item) {
 export function stackKey(item) {
   if (item.type === ITEM.POTION || item.type === ITEM.SCROLL) return `${item.type}:${item.kind}`;
   if (item.type === ITEM.RING) return `ring:${item.kind}:${item.upgrade || 0}`;
+  if (item.type === ITEM.WAND) return `wand:${item.kind}:${item.upgrade || 0}:${item.serial || 0}`;
   return item.type;
 }
 
@@ -156,7 +172,8 @@ export function rollLoot(depth, rng, { rich = false } = {}) {
   if (r < 0.60) return { type: ITEM.POTION, kind: rng.pick(COMMON_POTIONS) };
   if (r < 0.76) return { type: ITEM.SCROLL, kind: rng.pick(COMMON_SCROLLS) };
   if (r < 0.81) return { type: ITEM.BOMB, amount: rng.range(1, 3) };
-  if (r < 0.84) return rollRing(depth, rng);
+  if (r < 0.83) return rollRing(depth, rng);
+  if (r < 0.86) return rollWand(depth, rng);
   const tier = clampTier(Math.ceil(depth / 5) + (rng.chance(0.25) ? 1 : 0));
   if (r < 0.92) {
     return dressGear({ type: ITEM.WEAPON, tier, upgrade: rng.chance(0.25) ? 1 : 0 }, depth, rng);
@@ -171,7 +188,8 @@ export function rollPrize(depth, rng) {
   if (r < 0.28) return blessed({ type: ITEM.WEAPON, tier, upgrade: rng.range(1, 2) }, depth, rng);
   if (r < 0.56) return blessed({ type: ITEM.ARMOR, tier, upgrade: rng.range(1, 2) }, depth, rng);
   if (r < 0.68) return { type: ITEM.SCROLL, kind: SCROLL.UPGRADE };
-  if (r < 0.80) return { ...rollRing(depth, rng), cursed: false };
+  if (r < 0.74) return { ...rollRing(depth, rng), cursed: false };
+  if (r < 0.82) return rollWand(depth, rng);
   if (r < 0.90) return { type: ITEM.POTION, kind: POTION.STRENGTH };
   return { type: ITEM.GOLD, amount: rng.range(60, 60 + depth * 12) };
 }
@@ -209,6 +227,7 @@ export function itemValue(item) {
     case ITEM.POTION: return item.kind === POTION.STRENGTH ? 300 : 45;
     case ITEM.SCROLL: return item.kind === SCROLL.UPGRADE ? 300 : 45;
     case ITEM.RING: return 200 + (item.upgrade || 0) * 60;
+    case ITEM.WAND: return 220 + (item.upgrade || 0) * 70;
     case ITEM.WEAPON:
     case ITEM.ARMOR: {
       const t = item.tier || 1;

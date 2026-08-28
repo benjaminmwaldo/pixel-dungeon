@@ -10,7 +10,7 @@ import {
 } from './constants.js';
 import {
   LEVEL_W, LEVEL_LEN, TT, idx, tx, ty, inBounds, passable,
-  regionOf, rngFor, MAX_DEPTH, REGIONS,
+  regionOf, rngFor, MAX_DEPTH, REGIONS, shotPasses,
 } from './terrain.js';
 import { generate, ROOM } from './levelgen.js';
 import { viewFrom, hasLine } from './fov.js';
@@ -22,8 +22,9 @@ import { MOBS, SPAWNS, BOSS_OF, mobBudget, scaleFor, HEARING } from './mobs.js';
 import {
   ITEM, POTION, SCROLL, POTION_KINDS, SCROLL_KINDS, makeAppearances,
   rollLoot, rollPrize, rollDrop, WEAPONS, ARMORS, isConsumable, stackKey,
-  itemLabel, buyPrice, sellPrice, rollStock, isWorn,
+  itemLabel, buyPrice, sellPrice, rollStock, isWorn, isPointed,
 } from './items.js';
+import { WANDS, wandPower, tickWand, refill } from './wands.js';
 import { RINGS, applyRings, RING_LEARN_TICKS } from './rings.js';
 import { computeStats, canTake, clientMods, PERKS } from './perks.js';
 import { toBase64 } from './b64.js';
@@ -76,7 +77,7 @@ export class Game {
     this.state = 'lobby';
     this.seed = (Math.random() * 0x7fffffff) | 0;
     this.app = makeAppearances(this.seed);
-    this.known = { potions: [], scrolls: [], rings: [] };
+    this.known = { potions: [], scrolls: [], rings: [], wands: [] };
     this.metaDirty = true;
     this.banners = [];
     this.overTimer = 0;
@@ -240,6 +241,12 @@ export class Game {
     p.moveMult = eff.move * wear;
     p.liveMods = { ...p.mods, speedMult: p.mods.speedMult * p.moveMult };
     p.sinceHit = (p.sinceHit || 0) + 1;
+
+    // wands fill back up in the pack, faster with a ring of energy
+    const chargeRate = 1 / Math.max(0.3, p.stats.cdMult || 1);
+    for (const slot of p.bag) {
+      if (slot?.item?.type === ITEM.WAND) tickWand(slot.item, chargeRate);
+    }
 
     // a ring gives itself away once you have worn it a while
     for (const which of ['ring1', 'ring2']) {
@@ -564,6 +571,252 @@ export class Game {
         : `IT IS ${word}`, 1800);
     }
     this.metaDirty = true;
+  }
+
+  /**
+   * Spend a charge and point the thing. Everything is aimed with your facing,
+   * so there is no cursor and no pause — you turn, and you fire.
+   */
+  pointWand(p, f, item) {
+    const def = WANDS[item.kind];
+    if (!def) return;
+    if ((item.charges || 0) <= 0) {
+      this.banner('THE WAND IS SPENT', 1200);
+      return;
+    }
+    item.charges--;
+    if (!item.known) {
+      item.known = true;
+      if (!this.known.wands.includes(item.kind)) this.known.wands.push(item.kind);
+      this.banner(`IT IS A WAND OF ${def.name}`, 1800);
+    }
+    this.metaDirty = true;
+
+    const dmg = wandPower(def, f.depth, item.upgrade || 0);
+    const dx = DX[p.dir], dy = DY[p.dir];
+    const cx = p.x + 8, cy = p.y + 8;
+
+    switch (def.effect) {
+      case 'bolt': {
+        this.fx(f, 'bolt', cx, cy);
+        f.ents.push({
+          id: this.entSeq++, kind: KIND.BOLT, x: p.x, y: p.y, dir: p.dir,
+          box: { x: 4, y: 4, w: 8, h: 8 }, t: 0, aimed: true,
+          vx: dx * 4.4, vy: dy * 4.4, speed: 4.4, range: 190, travelled: 0,
+          dmg, owner: p.id, friendly: true,
+          freeze: def.freeze || 0, burn: def.burn || 0,
+        });
+        break;
+      }
+      case 'cone': {
+        // three tiles of flame straight ahead
+        for (let step = 1; step <= 3; step++) {
+          const x = cx + dx * step * TILE, y = cy + dy * step * TILE;
+          this.fx(f, 'fire', x, y);
+          const at = tileUnder({ x: x - 8, y: y - 8 }, PLAYER_BOX);
+          if (!passable(f.tiles[at])) break;
+          if (f.tiles[at] === TT.GRASS || f.tiles[at] === TT.HIGH_GRASS) f.set(at, TT.EMBERS);
+          for (const e of f.ents) {
+            if (e.dead || !isMob(e.kind)) continue;
+            if (dist2(e.x + 8, e.y + 8, x, y) > 14 * 14) continue;
+            this.hurtMob(e, dmg, p.dir, f, p);
+            if (def.burn) this.afflict(e, B.BURNING, def.burn, 1, f);
+          }
+        }
+        break;
+      }
+      case 'beam': {
+        // a line that does not stop at the first thing it meets
+        this.fx(f, 'beam', cx, cy);
+        for (let step = 1; step <= 10; step++) {
+          const x = cx + dx * step * TILE, y = cy + dy * step * TILE;
+          const at = tileUnder({ x: x - 8, y: y - 8 }, PLAYER_BOX);
+          if (!inBounds(tx(at), ty(at)) || !shotPasses(f.tiles[at])) break;
+          this.fx(f, 'spark', x, y);
+          for (const e of f.ents) {
+            if (e.dead || !isMob(e.kind)) continue;
+            if (dist2(e.x + 8, e.y + 8, x, y) > 12 * 12) continue;
+            this.hurtMob(e, dmg, p.dir, f, p);
+          }
+        }
+        break;
+      }
+      case 'chain': {
+        // hits what is ahead, then jumps between whatever is standing close
+        const first = this.nearestAhead(p, f, 120);
+        if (!first) { this.fx(f, 'spark', cx + dx * 20, cy + dy * 20); break; }
+        const struck = new Set([first]);
+        let from = first;
+        this.hurtMob(first, dmg, p.dir, f, p);
+        this.fx(f, 'spark', first.x + 8, first.y + 8);
+        for (let jump = 0; jump < 3; jump++) {
+          let next = null, best = Infinity;
+          for (const e of f.ents) {
+            if (e.dead || !isMob(e.kind) || struck.has(e)) continue;
+            const d = dist2(e.x, e.y, from.x, from.y);
+            if (d < best && d <= def.arc * def.arc) { best = d; next = e; }
+          }
+          if (!next) break;
+          struck.add(next);
+          this.hurtMob(next, Math.max(1, Math.round(dmg * 0.7)), p.dir, f, p);
+          this.fx(f, 'spark', next.x + 8, next.y + 8);
+          from = next;
+        }
+        break;
+      }
+      case 'gas': {
+        const x = cx + dx * 30, y = cy + dy * 30;
+        this.cloud(f, x, y, def.radius, B.CORROSION, def.corrode, p);
+        break;
+      }
+      case 'burst': {
+        this.fx(f, 'blast', cx, cy);
+        for (const e of f.ents) {
+          if (e.dead || !isMob(e.kind)) continue;
+          const d2 = dist2(e.x + 8, e.y + 8, cx, cy);
+          if (d2 > def.radius * def.radius) continue;
+          this.hurtMob(e, dmg, p.dir, f, p);
+          const d = Math.max(1, Math.sqrt(d2));
+          e.knockX = ((e.x + 8 - cx) / d) * def.knock;
+          e.knockY = ((e.y + 8 - cy) / d) * def.knock;
+          e.knockT = 8;
+        }
+        break;
+      }
+      case 'drain': {
+        const target = this.nearestAhead(p, f, 130);
+        if (!target) { this.banner('NOTHING IN FRONT OF YOU', 1100); break; }
+        this.hurtMob(target, dmg, p.dir, f, p);
+        this.healPlayer(p, Math.max(1, Math.round(dmg * 0.6)));
+        this.fx(f, 'heal', p.x + 8, p.y + 8);
+        break;
+      }
+      case 'grow': {
+        for (let step = 1; step <= def.reach; step++) {
+          const at = tileUnder({ x: cx + dx * step * TILE - 8, y: cy + dy * step * TILE - 8 }, PLAYER_BOX);
+          const t = f.tiles[at];
+          if (t === TT.FLOOR || t === TT.FLOOR_DECO || t === TT.EMBERS) f.set(at, TT.HIGH_GRASS);
+          else if (t === TT.GRASS) f.set(at, TT.HIGH_GRASS);
+          else if (!passable(t)) break;
+        }
+        this.fx(f, 'heal', cx + dx * 20, cy + dy * 20);
+        break;
+      }
+      case 'charm': {
+        const target = this.nearestAhead(p, f, 130);
+        if (!target) { this.banner('NOTHING IN FRONT OF YOU', 1100); break; }
+        this.afflict(target, B.CHARM, def.charm, 1, f);
+        this.fx(f, 'poof', target.x + 8, target.y + 8);
+        break;
+      }
+      case 'ward': {
+        // in front if there is room, otherwise anywhere beside you — a wand
+        // should not fizzle just because you are stood against a wall
+        const here = tileUnder(p, PLAYER_BOX);
+        const ahead = tileUnder({ x: cx + dx * TILE - 8, y: cy + dy * TILE - 8 }, PLAYER_BOX);
+        let at = null;
+        for (const cand of [ahead, here,
+                            idx(tx(here) + 1, ty(here)), idx(tx(here) - 1, ty(here)),
+                            idx(tx(here), ty(here) + 1), idx(tx(here), ty(here) - 1)]) {
+          if (cand !== null && cand !== undefined && passable(f.tiles[cand])) { at = cand; break; }
+        }
+        if (at === null) { this.banner('NO ROOM FOR IT THERE', 1200); break; }
+        const spot = tileToPixel(at, { x: 4, y: 4, w: 8, h: 8 });
+        f.ents.push({
+          id: this.entSeq++, kind: KIND.WARD, x: spot.x, y: spot.y, dir: p.dir,
+          box: { x: 4, y: 4, w: 8, h: 8 }, t: 0,
+          life: def.life, cd: 0, dmg, owner: p.id,
+        });
+        this.fx(f, 'poof', spot.x + 8, spot.y + 8);
+        break;
+      }
+      case 'flash': {
+        this.fx(f, 'blast', cx, cy);
+        for (const e of f.ents) {
+          if (e.dead || !isMob(e.kind)) continue;
+          if (dist2(e.x + 8, e.y + 8, cx, cy) > def.radius * def.radius) continue;
+          this.hurtMob(e, dmg, p.dir, f, p);
+          this.afflict(e, B.BLINDNESS, def.blind, 1, f);
+        }
+        this.afflict(p, B.LIGHT, 400, 1, f);
+        break;
+      }
+      default: break;
+    }
+  }
+
+  /**
+   * Walk a line out from the hero in the direction they face, stopping at the
+   * first wall. `onTile` sees each tile crossed; `onMob` sees each monster in
+   * the way, once. Stepping in small increments rather than tile-to-tile is
+   * what stops a beam sliding past something standing between two samples.
+   */
+  sweep(p, f, reach, onTile, onMob, spark) {
+    const dx = DX[p.dir], dy = DY[p.dir];
+    let x = p.x + 8, y = p.y + 8;
+    const hit = new Set();
+    const seenTiles = new Set();
+    const STEP = 4;
+    for (let d = STEP; d <= reach; d += STEP) {
+      x = p.x + 8 + dx * d;
+      y = p.y + 8 + dy * d;
+      const at = tileUnder({ x: x - 8, y: y - 8 }, PLAYER_BOX);
+      if (!inBounds(tx(at), ty(at)) || !shotPasses(f.tiles[at])) break;
+      if (!seenTiles.has(at)) {
+        seenTiles.add(at);
+        onTile?.(x, y, at);
+        if (spark) this.fx(f, spark, tx(at) * TILE + 8, ty(at) * TILE + 8);
+      }
+      for (const e of f.ents) {
+        if (e.dead || !isMob(e.kind) || hit.has(e)) continue;
+        if (!rectsOverlap(x - 5, y - 5, 10, 10,
+                          e.x + e.box.x, e.y + e.box.y, e.box.w, e.box.h)) continue;
+        hit.add(e);
+        onMob(e);
+      }
+    }
+    return hit;
+  }
+
+  /** The nearest monster roughly in front of the hero. */
+  nearestAhead(p, f, reach) {
+    const dx = DX[p.dir], dy = DY[p.dir];
+    const cx = p.x + 8, cy = p.y + 8;
+    let best = null, bd = Infinity;
+    for (const e of f.ents) {
+      if (e.dead || !isMob(e.kind)) continue;
+      const ox = e.x + 8 - cx, oy = e.y + 8 - cy;
+      if (ox * dx + oy * dy <= 0) continue;             // behind you
+      const off = Math.abs(ox * dy - oy * dx);          // how far off the line
+      if (off > 26) continue;
+      const d = ox * ox + oy * oy;
+      if (d > reach * reach || d >= bd) continue;
+      bd = d; best = e;
+    }
+    return best;
+  }
+
+  /** A ward sits where you left it and shoots whatever comes past. */
+  stepWard(e, f) {
+    if (--e.life <= 0) { e.dead = true; this.fx(f, 'poof', e.x + 8, e.y + 8); return; }
+    if (e.cd > 0) { e.cd--; return; }
+    let best = null, bd = Infinity;
+    for (const o of f.ents) {
+      if (o.dead || !isMob(o.kind)) continue;
+      const d = dist2(o.x, o.y, e.x, e.y);
+      if (d < bd && d < 130 * 130) { bd = d; best = o; }
+    }
+    if (!best) return;
+    e.cd = 40;
+    const dx = best.x - e.x, dy = best.y - e.y;
+    const d = Math.max(1, Math.hypot(dx, dy));
+    f.ents.push({
+      id: this.entSeq++, kind: KIND.BOLT, x: e.x, y: e.y, dir: e.dir,
+      box: { x: 4, y: 4, w: 8, h: 8 }, t: 0, aimed: true,
+      vx: (dx / d) * 3.8, vy: (dy / d) * 3.8, speed: 3.8, range: 150, travelled: 0,
+      dmg: e.dmg, owner: e.owner, friendly: true,
+    });
+    this.fx(f, 'bolt', e.x + 8, e.y + 8);
   }
 
   /** Somewhere on this floor a hero could stand. */
@@ -1168,6 +1421,7 @@ export class Game {
     const it = slot.item;
 
     if (isWorn(it)) { this.equipFrom(p, n); return; }
+    if (isPointed(it)) { this.pointWand(p, f, it); return; }
     if (it.type === ITEM.KEY || it.type === ITEM.GOLDKEY) return;  // spent on doors
 
     if (it.type === ITEM.FOOD) {
@@ -1357,10 +1611,19 @@ export class Game {
         this.banner('PAIN ANSWERS PAIN', 1600);
         break;
       }
-      case SCROLL.RECHARGE:
+      case SCROLL.RECHARGE: {
         p.abilityCd = 0;
         this.afflict(p, B.RECHARGING, 300);
+        let filled = 0;
+        for (const slot of p.bag) {
+          if (slot?.item?.type !== ITEM.WAND) continue;
+          refill(slot.item);
+          filled++;
+        }
+        if (filled) this.banner('YOUR WANDS ARE FULL AGAIN', 1600);
+        this.metaDirty = true;
         break;
+      }
       case SCROLL.REMOVE_CURSE:
         BF.cleanse(p);
         this.uncurse(p);
@@ -1740,6 +2003,7 @@ export class Game {
         return this.stepShot(e, f, players);
       case KIND.BOMB: return this.stepBomb(e, f);
       case KIND.BLAST: if (--e.life <= 0) e.dead = true; return;
+      case KIND.WARD: return this.stepWard(e, f);
       case KIND.ITEM: return;
       default: break;
     }
@@ -1967,6 +2231,8 @@ export class Game {
                           m.x + m.box.x, m.y + m.box.y, m.box.w, m.box.h)) continue;
         this.hurtMob(m, e.dmg, e.dir, f, this.players.get(e.owner));
         if (e.snare) m.frozen = Math.max(m.frozen, e.snare);
+        if (e.freeze) this.afflict(m, B.FROZEN, e.freeze, 1, f);
+        if (e.burn) this.afflict(m, B.BURNING, e.burn, 1, f);
         if (e.pierce > 0) { e.pierce--; e.hitIds = (e.hitIds || []).concat(m.id); continue; }
         e.dead = true;
         return;
@@ -2120,7 +2386,7 @@ export class Game {
     this.announceStart = true;
     this.seed = (Math.random() * 0x7fffffff) | 0;
     this.app = makeAppearances(this.seed);
-    this.known = { potions: [], scrolls: [], rings: [] };
+    this.known = { potions: [], scrolls: [], rings: [], wands: [] };
     this.floors.clear();
     this.kills = 0; this.deaths = 0; this.deepest = 1;
     for (const p of this.players.values()) {

@@ -44,7 +44,7 @@ export const KIND = {
   ARROW: 40, BOLT: 41, FIREBALL: 42, DART: 43, WEB: 44, ACID: 45, BEAM: 46,
 
   // world 60+
-  ITEM: 60, BOMB: 61, BLAST: 62, POOF: 63, GAS: 64,
+  ITEM: 60, BOMB: 61, BLAST: 62, POOF: 63, GAS: 64, WARD: 65,
 };
 
 export const MOB_MIN = 1, MOB_MAX = 39;

@@ -141,6 +141,7 @@ export function bakeAll() {
 
   IMG.POTION_TINTS = {};
   IMG.RING_TINTS = {};
+  IMG.WAND_TINTS = {};
 
   for (const [key, colour] of Object.entries({
     white: '#FCFCFC', gold: '#F8B800', red: '#F83800', grey: '#8890A0',
@@ -148,6 +149,15 @@ export function bakeAll() {
   })) {
     FONT_IMG[key] = bakeFont(colour);
   }
+}
+
+/** A wand drawn in the wood this run gave it. */
+export function wandImg(tint) {
+  IMG.WAND_TINTS ??= {};
+  if (!IMG.WAND_TINTS[tint]) {
+    IMG.WAND_TINTS[tint] = bake(GEAR.WAND, `wand:${tint}`, { W: tint });
+  }
+  return IMG.WAND_TINTS[tint];
 }
 
 /** A ring drawn with the stone this run gave it. */

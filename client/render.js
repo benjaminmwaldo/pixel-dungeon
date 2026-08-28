@@ -12,12 +12,13 @@ import {
 import { LEVEL_W, LEVEL_H, TT, idx, tx, ty, regionOf } from '../shared/terrain.js';
 import { ITEM, POTION_TINT } from '../shared/items.js';
 import { RING_TINT } from '../shared/rings.js';
+import { WAND_TINT } from '../shared/wands.js';
 import { MOBS } from '../shared/mobs.js';
 import { BUFFS } from '../shared/buffs.js';
 import { TRAPS, trapById } from '../shared/traps.js';
 import {
   IMG, TILE_IMG, TILE_DIM, WATER_IMG, WATER_DIM, HERO_IMG, bakeAll,
-  blit, text, textCentered, textWidth, silhouette, potionImg, ringImg,
+  blit, text, textCentered, textWidth, silhouette, potionImg, ringImg, wandImg,
 } from './art/bake.js';
 
 const C = {
@@ -254,6 +255,10 @@ export class Renderer {
     const shot = SHOT_SPRITE[e.kind];
     if (shot) { blit(g, IMG[shot], e.x, e.y); return; }
 
+    if (e.kind === KIND.WARD) {
+      blit(g, ((f >> 3) & 1) ? IMG.WARD2 : IMG.WARD1, e.x - 4, e.y - 4);
+      return;
+    }
     if (e.kind === KIND.BOMB) {
       blit(g, ((f >> 1) & 1) ? silhouette(IMG.ITEM_BOMB, '#FCFCFC') : IMG.ITEM_BOMB, e.x, e.y);
       return;
@@ -312,6 +317,10 @@ export class Renderer {
         const look = st.app?.ringLook?.[e.kind];
         return ringImg(RING_TINT[look] || '#FCFCFC');
       }
+      case ITEM.WAND: {
+        const look = st.app?.wandLook?.[e.kind];
+        return wandImg(WAND_TINT[look] || '#FCFCFC');
+      }
       default: return null;
     }
   }
@@ -361,7 +370,13 @@ export class Renderer {
       if (slot) {
         const img = this.itemImage({ type: slot.item.type, kind: slot.item.kind }, st);
         if (img) blit(g, img, x, 13);
-        if (slot.count > 1) text(g, String(slot.count), x + 9, 23, 'white', 6);
+        if (slot.item.type === ITEM.WAND) {
+          // a wand shows what it has left, not how many you carry
+          const n = slot.item.charges ?? 0;
+          text(g, String(n), x + 9, 23, n > 0 ? 'blue' : 'red', 6);
+        } else if (slot.count > 1) {
+          text(g, String(slot.count), x + 9, 23, 'white', 6);
+        }
       }
       text(g, String(i + 1), x + 5, 31, slot ? 'grey' : 'dark', 6);
     }
