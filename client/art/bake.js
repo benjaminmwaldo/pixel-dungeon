@@ -138,6 +138,14 @@ export function bakeAll() {
   IMG.FLY2 = bake(HERO.BAT2, 'fly2', { i: '#8CC030', j: '#3C6010', d: '#F8F800' });
   IMG.WARLOCK1 = bake(MOB.WRAITH1, 'warlock1', { c: '#8858FC', 1: '#FCE0A8' });
   IMG.WARLOCK2 = bake(MOB.WRAITH2, 'warlock2', { c: '#8858FC', 1: '#FCE0A8' });
+  IMG.TRICKSTER1 = bake(MOB.GNOLL1, 'trickster1', { l: '#B85820', k: '#5C2808' });
+  IMG.TRICKSTER2 = bake(MOB.GNOLL2, 'trickster2', { l: '#B85820', k: '#5C2808' });
+  IMG.SPINNER1 = bake(MOB.SPIDER1, 'spinner1', { j: '#6C2038', d: '#C83858' });
+  IMG.SPINNER2 = bake(MOB.SPIDER2, 'spinner2', { j: '#6C2038', d: '#C83858' });
+  IMG.ENGINE1 = bake(MOB.SPARK1, 'engine1', { m: '#F8B800', X: '#583818', V: '#A87838' });
+  IMG.ENGINE2 = bake(MOB.SPARK2, 'engine2', { c: '#F8E058', X: '#583818', V: '#A87838' });
+  IMG.RIPPER1 = bake(MOB.DEMON1, 'ripper1', { n: '#901020', j: '#480818', d: '#F85040' });
+  IMG.RIPPER2 = bake(MOB.DEMON2, 'ripper2', { n: '#901020', j: '#480818', d: '#F85040' });
 
   IMG.POTION_TINTS = {};
   IMG.RING_TINTS = {};

@@ -22,6 +22,7 @@ export const MOBS = {
   [KIND.CRAB]:     { name: 'SEWER CRAB', sprite: 'CRAB', hp: 16, dmg: 4, speed: 1.2, xp: 5, ai: 'chase', box: BOX, armour: 2 },
   [KIND.SLIME]:    { name: 'MARSH SLIME', sprite: 'SLIME', hp: 12, dmg: 3, speed: 1.0, xp: 4, ai: 'chase', box: BOX, splits: true },
   [KIND.FLY]:      { name: 'SWARM OF FLIES', sprite: 'FLY', hp: 6, dmg: 2, speed: 2.6, xp: 3, ai: 'flyer', box: BOX },
+  [KIND.GNOLL]:    { name: 'GNOLL SCOUT', sprite: 'GNOLL', hp: 14, dmg: 3, speed: 1.9, xp: 6, ai: 'chase', box: BIG },
 
   // ---- the prison -------------------------------------------------------
   [KIND.SKELETON]: { name: 'SKELETON', sprite: 'BONE', hp: 24, dmg: 6, speed: 1.4, xp: 9, ai: 'chase', box: BIG, bursts: true },
@@ -30,21 +31,58 @@ export const MOBS = {
   [KIND.SHAMAN]:   { name: 'NECROMANCER', sprite: 'SHAMAN', hp: 18, dmg: 5, speed: 1.2, xp: 10, ai: 'caster', box: BIG, shot: KIND.BOLT },
   [KIND.WRAITH]:   { name: 'WRAITH', sprite: 'WRAITH', hp: 16, dmg: 7, speed: 2.0, xp: 11, ai: 'flyer', box: BIG, phasing: true },
 
+  [KIND.TRICKSTER]: {
+    name: 'GNOLL TRICKSTER', sprite: 'TRICKSTER', hp: 22, dmg: 5, speed: 2.0, xp: 11,
+    ai: 'shooter', box: BIG, shot: KIND.DART, range: 120, keepsAway: true,
+  },
+  [KIND.LASHER]: {
+    name: 'ROT LASHER', sprite: 'LASHER', hp: 45, dmg: 9, speed: 0, xp: 14,
+    ai: 'idle', box: BIG, armour: 3, rooted: true,
+  },
+
   // ---- the caves --------------------------------------------------------
   [KIND.BAT]:      { name: 'VAMPIRE BAT', sprite: 'BAT', hp: 22, dmg: 6, speed: 2.8, xp: 13, ai: 'flyer', box: BOX, drains: true },
   [KIND.BRUTE]:    { name: 'GNOLL BRUTE', sprite: 'BRUTE', hp: 45, dmg: 11, speed: 1.6, xp: 20, ai: 'chase', box: BIG, enrages: true },
   [KIND.SPIDER]:   { name: 'CAVE SPINNER', sprite: 'SPIDER', hp: 30, dmg: 8, speed: 1.9, xp: 18, ai: 'shooter', box: BIG, shot: KIND.WEB, range: 110 },
   [KIND.GOLEM]:    { name: 'STONE GOLEM', sprite: 'GOLEM', hp: 60, dmg: 12, speed: 1.0, xp: 24, ai: 'chase', box: BIG, armour: 8 },
 
+  [KIND.SPINNER]: {
+    name: 'GIANT SPINNER', sprite: 'SPINNER', hp: 38, dmg: 9, speed: 2.2, xp: 21,
+    ai: 'shooter', box: BIG, shot: KIND.WEB, range: 130, keepsAway: true, poisons: 220,
+  },
+  [KIND.SPARK]: {
+    name: 'DM-100', sprite: 'SPARK', hp: 34, dmg: 10, speed: 1.3, xp: 22,
+    ai: 'shooter', box: BIG, shot: KIND.BOLT, range: 140, armour: 4, shocks: 40,
+  },
+
   // ---- the metropolis ---------------------------------------------------
   [KIND.MONK]:     { name: 'DWARF MONK', sprite: 'MONK', hp: 40, dmg: 12, speed: 2.4, xp: 28, ai: 'chase', box: BIG, disarms: true },
   [KIND.WARLOCK]:  { name: 'DWARF WARLOCK', sprite: 'WARLOCK', hp: 38, dmg: 12, speed: 1.4, xp: 30, ai: 'caster', box: BIG, shot: KIND.BOLT },
   [KIND.ELEMENTAL]:{ name: 'FIRE ELEMENTAL', sprite: 'ELEMENTAL', hp: 34, dmg: 11, speed: 2.0, xp: 29, ai: 'shooter', box: BOX, shot: KIND.FIREBALL, range: 130, burns: true },
 
+  [KIND.SUCCUBUS]: {
+    name: 'SUCCUBUS', sprite: 'SUCCUBUS', hp: 42, dmg: 13, speed: 2.2, xp: 32,
+    ai: 'chase', box: BIG, blinks: true, charms: 260,
+  },
+  [KIND.ENGINE]: {
+    name: 'DM-200', sprite: 'ENGINE', hp: 70, dmg: 15, speed: 1.1, xp: 34,
+    ai: 'chase', box: BIG, armour: 9, fumes: 200,
+  },
+
   // ---- the demon halls --------------------------------------------------
-  [KIND.DEMON]:    { name: 'SUCCUBUS', sprite: 'DEMON', hp: 50, dmg: 16, speed: 2.3, xp: 40, ai: 'chase', box: BIG, blinks: true },
+  [KIND.DEMON]:    { name: 'HORNED DEMON', sprite: 'DEMON', hp: 50, dmg: 16, speed: 2.3, xp: 40, ai: 'chase', box: BIG, blinks: true },
   [KIND.EYE]:      { name: 'EVIL EYE', sprite: 'EYE', hp: 44, dmg: 18, speed: 1.3, xp: 42, ai: 'shooter', box: BIG, shot: KIND.BEAM, range: 170 },
   [KIND.SCORPIO]:  { name: 'SCORPIO', sprite: 'SCORPIO', hp: 46, dmg: 15, speed: 1.6, xp: 41, ai: 'shooter', box: BIG, shot: KIND.DART, range: 150, keepsAway: true },
+
+  [KIND.RIPPER]: {
+    name: 'RIPPER DEMON', sprite: 'RIPPER', hp: 40, dmg: 20, speed: 3.0, xp: 44,
+    ai: 'chase', box: BIG, bleeds: 240,
+  },
+  [KIND.SPAWNER]: {
+    name: 'DEMON SPAWNER', sprite: 'SPAWNER', hp: 90, dmg: 0, speed: 0, xp: 60,
+    ai: 'idle', box: BIG, armour: 6, rooted: true, harmless: true,
+    spawns: KIND.RIPPER, every: 260,
+  },
 
   // ---- harmless -----------------------------------------------------------
   [KIND.SHEEP]:    { name: 'SHEEP', sprite: 'SHEEP', hp: 4, dmg: 0, speed: 1.1, xp: 0, ai: 'wander', box: BOX, harmless: true },
@@ -142,11 +180,16 @@ export const MOBS = {
 
 /** Who can turn up on a given floor. */
 export const SPAWNS = {
-  sewers: [KIND.RAT, KIND.RAT, KIND.SNAKE, KIND.FLY, KIND.SLIME, KIND.CRAB],
-  prison: [KIND.SKELETON, KIND.SKELETON, KIND.THIEF, KIND.GUARD, KIND.SHAMAN, KIND.WRAITH],
-  caves:  [KIND.BAT, KIND.BAT, KIND.BRUTE, KIND.SPIDER, KIND.GOLEM],
-  city:   [KIND.MONK, KIND.WARLOCK, KIND.ELEMENTAL, KIND.GOLEM, KIND.MONK],
-  halls:  [KIND.DEMON, KIND.EYE, KIND.SCORPIO, KIND.DEMON],
+  sewers: [KIND.RAT, KIND.RAT, KIND.SNAKE, KIND.FLY, KIND.SLIME, KIND.CRAB,
+           KIND.GNOLL, KIND.GNOLL],
+  prison: [KIND.SKELETON, KIND.SKELETON, KIND.THIEF, KIND.GUARD, KIND.SHAMAN,
+           KIND.WRAITH, KIND.TRICKSTER, KIND.LASHER],
+  caves:  [KIND.BAT, KIND.BAT, KIND.BRUTE, KIND.SPIDER, KIND.GOLEM,
+           KIND.SPINNER, KIND.SPARK, KIND.SPARK],
+  city:   [KIND.MONK, KIND.WARLOCK, KIND.ELEMENTAL, KIND.GOLEM, KIND.MONK,
+           KIND.SUCCUBUS, KIND.ENGINE],
+  halls:  [KIND.DEMON, KIND.EYE, KIND.SCORPIO, KIND.DEMON,
+           KIND.RIPPER, KIND.RIPPER, KIND.SPAWNER],
 };
 
 export const BOSS_OF = {

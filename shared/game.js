@@ -2454,6 +2454,11 @@ export class Game {
         const champ = e.champ ? CHAMPIONS[e.champ] : null;
         if (champ?.burns) this.afflict(p, B.BURNING, champ.burns, 1, f);
         if (champ?.blinds) this.afflict(p, B.BLINDNESS, champ.blinds, 1, f);
+        if (st.bleeds) this.afflict(p, B.BLEEDING, st.bleeds, 1, f);
+        if (st.charms) this.afflict(p, B.CHARM, st.charms, 1, f);
+        if (st.poisons) this.afflict(p, B.POISON, st.poisons, 1, f);
+        if (st.shocks) this.afflict(p, B.PARALYSIS, Math.round(st.shocks / 2), 1, f);
+        if (st.fumes) this.cloud(f, e.x + 8, e.y + 8, 34, B.POISON, st.fumes, e);
         if (champ?.knock) {
           const dx = p.x - e.x, dy = p.y - e.y;
           const d = Math.max(1, Math.hypot(dx, dy));
@@ -2588,6 +2593,19 @@ export class Game {
       }
     }
 
+    if (st.rooted) {
+      // it grew here and it is not going anywhere
+      if (st.spawns && --e.cd <= 0) {
+        e.cd = st.every || 300;
+        const near = f.ents.filter(o => !o.dead && o.kind === st.spawns).length;
+        if (near < 4) {
+          const m = this.spawnMob(f, st.spawns, e.x, e.y + 16, { champion: null });
+          if (m) m.alerted = 900;
+          this.fx(f, 'summon', e.x + 8, e.y + 8);
+        }
+      }
+      return;
+    }
     if (e.fleeing > 0 && target) this.stepAway(e, f, target, speed, mode);
     else if (st.ai === 'flyer') this.stepFlyer(e, f, target, speed);
     else if (st.ai === 'shooter' && target) this.stepShooter(e, f, target, st, speed, mode);

@@ -94,26 +94,29 @@ treasure (extra drops and a prize), trapped (a second helping of traps), and
 dark (sight radius cut by three, which now bites indoors too — a lit room no
 longer reveals further than you can see).
 
-## Wave 4 — actors — **next**
+## Wave 4 — actors — **done**
 
-**A mob roster that matches the source** per chapter, including the variants:
-albino rat, caustic slime, hermit crab, great crab, armoured brute, gnoll
-trickster/geomancer/guard/sapper, spectral necromancer, ghoul, DM-100/200/201,
-acidic scorpio, ripper demon, phantom piranha, rot heart and lasher, bees.
+**A mob roster that matches the source** — *shipped: 43 entries, nine of them
+new.* A gnoll scout in the sewers; a trickster who keeps his distance and a rot
+lasher who never moves in the prison; a giant spinner and a DM-100 in the
+caves; a succubus and a DM-200 in the city; ripper demons and a demon spawner
+in the halls. Each chapter now has six or more different things in it.
 
-**Champion enemies** — the occasional monster wearing a modifier: blazing,
-projecting, armoured, blessed, growing, halo.
+**Champion enemies** — *shipped: seven.* Blazing, projecting, armoured,
+blessed, growing, haloed and giant. None in the sewers, commoner as you go
+down, never more than about one in seven, and each wears its own colour.
 
-**Boss mechanics with phases**, not just a bigger health bar. Goo's pump-up,
-Tengu's phase jumps and trap grids, DM-300's pylons and collapsing floor, the
-Dwarf King's summoned court, Yog-Dzewa's fists.
+**Boss mechanics with phases** — *shipped, all five.* Glut's pump-up and the
+water it mends in; the Warden's blink-and-leave-a-trap; the Tyrant's pylons and
+broken ground; the King's court and his second, worse self; the Unsleeping's
+fists, which have to come off before anything touches it.
 
-**NPCs and their quests.** The sad ghost (fetid rat / gnoll trickster / great
-crab), the old wandmaker (corpse dust / rotberry / elemental embers), the
-blacksmith (dark gold ore, reforging), the ambitious imp, the rat king,
-wandering sheep.
+**NPCs and their quests** — *shipped: four.* The sad ghost, the old wandmaker,
+the blacksmith and the ambitious imp, one per chapter, each asking once per run.
+No dialogue tree — you press the same key you press for everything else. The rat
+king was dropped; the sheep already wanders.
 
-## Wave 5 — the long tail
+## Wave 5 — the long tail — **next**
 
 **Alchemy.** A pot in the laboratory: seeds into potions, potions into exotic
 potions, scrolls into exotic scrolls, plus bombs and elixirs.

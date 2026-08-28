@@ -26,36 +26,45 @@ export const OPPOSITE = [S, W, N, E];
 // Entities
 // ---------------------------------------------------------------------------
 export const KIND = {
-  // mobs 1..39
-  RAT: 1, SNAKE: 2, CRAB: 3, SLIME: 4, FLY: 5,
+  // ---- creatures, 1..59 -------------------------------------------------
+  // the sewers
+  RAT: 1, SNAKE: 2, CRAB: 3, SLIME: 4, FLY: 5, GNOLL: 22,
+  // the prison
   SKELETON: 6, THIEF: 7, GUARD: 8, SHAMAN: 9, WRAITH: 10,
-  BAT: 11, BRUTE: 12, SPIDER: 13, GOLEM: 14,
-  MONK: 15, WARLOCK: 16, ELEMENTAL: 17,
-  DEMON: 18, EYE: 19, SCORPIO: 20,
+  TRICKSTER: 23, LASHER: 24,
+  // the caves
+  BAT: 11, BRUTE: 12, SPIDER: 13, GOLEM: 14, SPINNER: 25, SPARK: 26,
+  // the city
+  MONK: 15, WARLOCK: 16, ELEMENTAL: 17, SUCCUBUS: 27, ENGINE: 28,
+  // the halls
+  DEMON: 18, EYE: 19, SCORPIO: 20, RIPPER: 29, SPAWNER: 30,
+  // wandering about
   SHEEP: 21,
 
   // townsfolk, who happen to live very far underground
-  SHOPKEEPER: 22, GHOST: 23, WANDMAKER: 24, BLACKSMITH: 25, IMP: 29,
+  SHOPKEEPER: 40, GHOST: 41, WANDMAKER: 42, BLACKSMITH: 43, IMP: 44,
 
-  MIMIC: 26,
+  // things that pretend, and things a boss brings with it
+  MIMIC: 45, PYLON: 46, FIST: 47,
 
-  // things a boss brings with it
-  PYLON: 27, FIST: 28,
-  BOSS_GLUT: 30, BOSS_WARDEN: 31, BOSS_TYRANT: 32, BOSS_KING: 33, BOSS_UNSLEEPING: 34,
+  // the five chapter bosses
+  BOSS_GLUT: 50, BOSS_WARDEN: 51, BOSS_TYRANT: 52, BOSS_KING: 53,
+  BOSS_UNSLEEPING: 54,
 
-  // projectiles 40..59
-  ARROW: 40, BOLT: 41, FIREBALL: 42, DART: 43, WEB: 44, ACID: 45, BEAM: 46,
+  // ---- projectiles, 60..79 ----------------------------------------------
+  ARROW: 60, BOLT: 61, FIREBALL: 62, DART: 63, WEB: 64, ACID: 65, BEAM: 66,
 
-  // world 60+
-  ITEM: 60, BOMB: 61, BLAST: 62, POOF: 63, GAS: 64, WARD: 65, THROWN: 66,
-  SPIRIT: 67,
+  // ---- the world, 80+ ----------------------------------------------------
+  ITEM: 80, BOMB: 81, BLAST: 82, POOF: 83, GAS: 84, WARD: 85, THROWN: 86,
+  SPIRIT: 87,
 };
 
-export const MOB_MIN = 1, MOB_MAX = 39;
+export const MOB_MIN = 1, MOB_MAX = 59;
 export const isMob = (k) => k >= MOB_MIN && k <= MOB_MAX;
-export const isBoss = (k) => k >= 30 && k <= 39;
+export const isBoss = (k) => k >= 50 && k <= 59;
 // Somebody who talks rather than bites.
-const NPCS = new Set([22, 23, 24, 25, 29]);
+const NPCS = new Set([KIND.SHOPKEEPER, KIND.GHOST, KIND.WANDMAKER,
+                      KIND.BLACKSMITH, KIND.IMP]);
 export const isNpc = (k) => NPCS.has(k);
 
 // ---------------------------------------------------------------------------
