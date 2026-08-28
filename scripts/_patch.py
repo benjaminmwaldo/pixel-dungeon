@@ -9,169 +9,223 @@ def edit(path, *pairs):
     io.open(path, 'w', encoding='utf-8', newline='\n').write(s)
     print('  patched', path)
 
-edit('shared/constants.js',
-  ("  ITEM: 60, BOMB: 61, BLAST: 62, POOF: 63, GAS: 64, WARD: 65,",
-   "  ITEM: 60, BOMB: 61, BLAST: 62, POOF: 63, GAS: 64, WARD: 65, THROWN: 66,"))
-
-edit('shared/items.js',
-  ("  BOMB: 'bomb', RELIC: 'relic', RING: 'ring', WAND: 'wand',\n};",
-   "  BOMB: 'bomb', RELIC: 'relic', RING: 'ring', WAND: 'wand', MISSILE: 'missile',\n};"),
-
-  ("import { WANDS, WAND_IDS, WAND_LOOKS, rollWand } from './wands.js';",
-   "import { WANDS, WAND_IDS, WAND_LOOKS, rollWand } from './wands.js';\nimport { MISSILES, rollMissile } from './missiles.js';"),
-
-  # you can see what a stone is by looking at it
-  ("""    case ITEM.WAND: {
-      const plus = item.upgrade ? `+${item.upgrade} ` : '';""",
-   """    case ITEM.MISSILE: {
-      const def = MISSILES[item.kind];
-      const n = item.amount || 1;
-      return n > 1 ? `${n} ${def.name}S` : def.name;
-    }
-    case ITEM.WAND: {
-      const plus = item.upgrade ? `+${item.upgrade} ` : '';"""),
-
-  # they stack, and they live in the quick bar
-  ("""export function isConsumable(item) {
-  return item.type === ITEM.POTION || item.type === ITEM.SCROLL ||
-         item.type === ITEM.FOOD || item.type === ITEM.BOMB ||
-         item.type === ITEM.KEY || item.type === ITEM.GOLDKEY;
-}""",
-   """export function isConsumable(item) {
-  return item.type === ITEM.POTION || item.type === ITEM.SCROLL ||
-         item.type === ITEM.FOOD || item.type === ITEM.BOMB ||
-         item.type === ITEM.KEY || item.type === ITEM.GOLDKEY ||
-         item.type === ITEM.MISSILE;
-}"""),
-
-  ("  if (item.type === ITEM.POTION || item.type === ITEM.SCROLL) return `${item.type}:${item.kind}`;",
-   "  if (item.type === ITEM.POTION || item.type === ITEM.SCROLL) return `${item.type}:${item.kind}`;\n  if (item.type === ITEM.MISSILE) return `missile:${item.kind}`;"),
-
-  ("  if (r < 0.83) return rollRing(depth, rng);",
-   "  if (r < 0.79) return rollMissile(depth, rng);\n  if (r < 0.83) return rollRing(depth, rng);"),
-
-  ("    case ITEM.RING: return 200 + (item.upgrade || 0) * 60;",
-   "    case ITEM.MISSILE: return (MISSILES[item.kind]?.dmg || 3) * 5 * (item.amount || 1);\n    case ITEM.RING: return 200 + (item.upgrade || 0) * 60;"),
-)
-
 edit('shared/game.js',
-  ("import { WANDS, wandPower, tickWand, refill } from './wands.js';",
-   "import { WANDS, wandPower, tickWand, refill } from './wands.js';\nimport { MISSILES, missilePower } from './missiles.js';"),
-
-  ("    if (isPointed(it)) { this.pointWand(p, f, it); return; }",
-   "    if (isPointed(it)) { this.pointWand(p, f, it); return; }\n    if (it.type === ITEM.MISSILE) { this.throwMissile(p, f, n); return; }"),
-)
-
-edit('shared/game.js',
-  ("""  /** The nearest monster roughly in front of the hero. */""",
-   """  /**
-   * Throw one of whatever is in that slot. It flies where you face, and what
-   * is left of it lands on the floor for you to pick up on the way past.
-   */
-  throwMissile(p, f, n) {
+  ("""  /**
+   * Throw one of whatever is in that slot.""",
+   """  /** Put an artifact on, swapping out whatever was there. */
+  wearArtifact(p, n) {
     const slot = p.bag[n];
     if (!slot) return;
-    const item = slot.item;
-    const def = MISSILES[item.kind];
-    if (!def) return;
+    const art = slot.item;
+    const old = p.equip.artifact;
+    p.equip.artifact = { ...art };
+    p.bag[n] = old ? { key: stackKey(old), item: old, count: 1 } : null;
+    this.fx(this.floor(p.depth), 'equip', p.x + 8, p.y + 8);
+    this.banner(`${p.name} TAKES UP THE ${ARTIFACTS[art.kind].name}`, 1800);
+    this.recalc(p);
+  }
 
-    if (--slot.count <= 0) p.bag[n] = null;
+  /** Feed the worn artifact whatever it lives on, and say so if it grows. */
+  growArtifact(p, what, amount = 1) {
+    const art = p.equip.artifact;
+    if (!art) return;
+    if (feed(art, what, amount)) {
+      this.banner(`THE ${ARTIFACTS[art.kind].name} IS STRONGER`, 1800);
+      this.metaDirty = true;
+    }
+  }
+
+  /**
+   * The one thing you carry that answers to its own key. Everything here is
+   * instant — nothing may pause, because three other people are playing.
+   */
+  useArtifact(p) {
+    if (p.ghost || this.state !== 'play') return;
+    const art = p.equip.artifact;
+    if (!art) { this.banner('YOU ARE CARRYING NO SUCH THING', 1200); return; }
+    const def = ARTIFACTS[art.kind];
+    if (!def.active) { this.banner(`THE ${def.name} WORKS ON ITS OWN`, 1400); return; }
+    if ((art.charge || 0) <= 0) { this.banner(`THE ${def.name} IS SPENT`, 1200); return; }
+
+    const f = this.floor(p.depth);
+    const lv = art.level;
+    art.charge--;
+    this.growArtifact(p, 'use');
     this.metaDirty = true;
 
-    const dmg = missilePower(def, f.depth, p.stats.ranged);
-    const dx = DX[p.dir], dy = DY[p.dir];
-    f.ents.push({
-      id: this.entSeq++, kind: KIND.THROWN, x: p.x, y: p.y, dir: p.dir,
-      box: { x: 4, y: 4, w: 8, h: 8 }, t: 0, aimed: true,
-      vx: dx * def.speed, vy: dy * def.speed, speed: def.speed,
-      range: def.range * p.stats.rangeMult, travelled: 0,
-      dmg, owner: p.id, friendly: true,
-      missile: item.kind,
-      pierce: def.pierce || 0,
-      hitIds: [],
-      homeX: p.x, homeY: p.y, coming: false,
-    });
-    this.fx(f, 'arrow', p.x + 8, p.y + 8);
-  }
+    switch (art.kind) {
+      case ART.CLOAK:
+        p.invis = Math.max(p.invis, 160 + lv * 30);
+        this.afflict(p, B.INVISIBLE, 160 + lv * 30, 1, f);
+        this.fx(f, 'cloak', p.x + 8, p.y + 8);
+        this.banner(`${p.name} STEPS OUT OF SIGHT`, 1400);
+        break;
 
-  /** A thrown thing in flight: it hits, it lands, or it comes back. */
-  stepThrown(e, f, players) {
-    const def = MISSILES[e.missile];
-    e.x += e.vx; e.y += e.vy;
-    e.travelled += Math.hypot(e.vx, e.vy);
+      case ART.HORN:
+        p.hunger = HUNGER_MAX;
+        this.healPlayer(p, 4 + lv);
+        this.fx(f, 'eat', p.x + 8, p.y + 8);
+        this.banner('A MEAL OUT OF NOTHING', 1400);
+        break;
 
-    // a boomerang turns round at the far end and flies home
-    if (def.returns && !e.coming && e.travelled >= e.range * 0.5) {
-      e.coming = true;
-      e.hitIds = [];
-      const dx = e.homeX - e.x, dy = e.homeY - e.y;
-      const d = Math.max(1, Math.hypot(dx, dy));
-      e.vx = (dx / d) * e.speed;
-      e.vy = (dy / d) * e.speed;
-    }
-
-    for (const m of f.ents) {
-      if (m.dead || !isMob(m.kind) || e.hitIds.includes(m.id)) continue;
-      if (!rectsOverlap(e.x + 4, e.y + 4, 8, 8,
-                        m.x + m.box.x, m.y + m.box.y, m.box.w, m.box.h)) continue;
-      e.hitIds.push(m.id);
-      this.hurtMob(m, e.dmg, e.dir, f, this.players.get(e.owner));
-      if (def.roots) this.afflict(m, B.ROOTS, def.roots, 1, f);
-      if (def.cripple) this.afflict(m, B.CRIPPLE, def.cripple, 1, f);
-      if (def.bleed) this.afflict(m, B.BLEEDING, def.bleed, 1, f);
-      if (def.burst) {
-        this.fx(f, 'blast', e.x + 8, e.y + 8);
-        for (const o of f.ents) {
-          if (o.dead || !isMob(o.kind) || o === m) continue;
-          const d2 = dist2(o.x + 8, o.y + 8, e.x + 8, e.y + 8);
-          if (d2 > def.burst * def.burst) continue;
-          this.hurtMob(o, Math.round(e.dmg * 0.6), e.dir, f, this.players.get(e.owner));
-          const d = Math.max(1, Math.sqrt(d2));
-          o.knockX = ((o.x - e.x) / d) * def.knock;
-          o.knockY = ((o.y - e.y) / d) * def.knock;
-          o.knockT = 8;
+      case ART.CHALICE: {
+        // it wants your blood, and pays for it afterwards
+        const cost = Math.max(2, Math.round(p.maxHp * 0.18));
+        this.hurtPlayer(p, cost, p.x + 8, p.y + 8, null, true);
+        if (!p.ghost) {
+          this.growArtifact(p, 'blood');
+          this.afflict(p, B.REGEN, 600 + lv * 120, 1 + Math.floor(lv / 3), f);
+          this.banner('THE CHALICE DRINKS, AND THEN GIVES BACK', 1800);
         }
+        break;
       }
-      if (e.pierce > 0 && !def.returns) { e.pierce--; continue; }
-      if (def.returns) continue;      // it carries on and comes back
-      return this.landMissile(e, f);
-    }
 
-    // a returning throw is caught rather than dropped
-    if (def.returns && e.coming) {
+      case ART.TALISMAN: {
+        const reach = 4 + lv;
+        const here = tileUnder(p, PLAYER_BOX);
+        const cx = tx(here), cy = ty(here);
+        let found = 0;
+        for (let dy = -reach; dy <= reach; dy++) {
+          for (let dx = -reach; dx <= reach; dx++) {
+            const nx = cx + dx, ny = cy + dy;
+            if (!inBounds(nx, ny)) continue;
+            const j = idx(nx, ny);
+            if (f.tiles[j] === TT.TRAP_HIDDEN) { f.set(j, TT.TRAP); found++; }
+            else if (f.tiles[j] === TT.SECRET_DOOR) { f.set(j, TT.DOOR); found++; }
+          }
+        }
+        if (found) this.growArtifact(p, 'search', found);
+        this.banner(found ? `THE FLOOR GIVES UP ${found} SECRETS` : 'NOTHING IS HIDDEN HERE', 1600);
+        break;
+      }
+
+      case ART.HOURGLASS: {
+        const ticks = 90 + lv * 20;
+        for (const e of f.ents) {
+          if (e.dead || !isMob(e.kind) || isNpc(e.kind)) continue;
+          this.afflict(e, B.FROZEN, ticks, 1, f);
+        }
+        this.fx(f, 'freeze', p.x + 8, p.y + 8);
+        this.banner('EVERYTHING BUT YOU STOPS', 1800);
+        break;
+      }
+
+      case ART.CAPE:
+        this.afflict(p, B.BARKSKIN, 260 + lv * 40, 1, f);
+        p.thorns = 260 + lv * 40;
+        this.fx(f, 'guard', p.x + 8, p.y + 8);
+        this.banner('THE CAPE BRISTLES', 1500);
+        break;
+
+      case ART.ROSE: {
+        const spot = tileToPixel(tileUnder(p, PLAYER_BOX), { x: 4, y: 4, w: 8, h: 8 });
+        f.ents.push({
+          id: this.entSeq++, kind: KIND.SPIRIT, x: spot.x, y: spot.y, dir: p.dir,
+          box: { x: 3, y: 5, w: 10, h: 10 }, t: 0,
+          life: 500 + lv * 100, cd: 0,
+          dmg: 4 + lv * 2, owner: p.id,
+        });
+        this.fx(f, 'poof', p.x + 8, p.y + 8);
+        this.banner('SOMEONE NOT QUITE GONE STEPS OUT', 1800);
+        break;
+      }
+
+      case ART.CHAINS: {
+        // grab the nearest thing ahead and haul it in
+        const target = this.nearestAhead(p, f, 140 + lv * 10);
+        if (target) {
+          const dx = p.x - target.x, dy = p.y - target.y;
+          const d = Math.max(1, Math.hypot(dx, dy));
+          target.knockX = (dx / d) * 26;
+          target.knockY = (dy / d) * 26;
+          target.knockT = 8;
+          this.afflict(target, B.CRIPPLE, 120, 1, f);
+          this.fx(f, 'clang', target.x + 8, target.y + 8);
+          this.banner('THE CHAINS TAKE HOLD', 1400);
+        } else {
+          // nothing there: haul yourself instead
+          const dxx = DX[p.dir], dyy = DY[p.dir];
+          for (let step = 6; step >= 1; step--) {
+            const at = tileUnder({ x: p.x + dxx * step * TILE, y: p.y + dyy * step * TILE }, PLAYER_BOX);
+            if (!passable(f.tiles[at])) continue;
+            const spot = tileToPixel(at, PLAYER_BOX);
+            p.x = spot.x; p.y = spot.y;
+            p.fovTile = -1;
+            break;
+          }
+          this.fx(f, 'poof', p.x + 8, p.y + 8);
+          this.banner('YOU HAUL YOURSELF ACROSS', 1400);
+        }
+        break;
+      }
+
+      case ART.BEACON: {
+        if (!art.beacon || art.beacon.depth !== p.depth) {
+          art.beacon = { depth: p.depth, x: Math.round(p.x), y: Math.round(p.y) };
+          art.charge++;                          // setting it is free
+          this.fx(f, 'poof', p.x + 8, p.y + 8);
+          this.banner('THIS PLACE IS REMEMBERED', 1600);
+        } else {
+          p.x = art.beacon.x; p.y = art.beacon.y;
+          p.fovTile = -1;
+          this.fx(f, 'teleport', p.x + 8, p.y + 8);
+          this.banner('THE BEACON PULLS YOU BACK', 1600);
+        }
+        break;
+      }
+
+      case ART.SPELLBOOK: {
+        const pool = [SCROLL.MAPPING, SCROLL.TERROR, SCROLL.RAGE, SCROLL.LULLABY,
+                      SCROLL.RECHARGE, SCROLL.MIRROR, SCROLL.TELEPORT];
+        const pick = pool[Math.floor(Math.random() * pool.length)];
+        this.banner('THE BOOK FALLS OPEN SOMEWHERE', 1400);
+        this.read(p, f, pick);
+        break;
+      }
+
+      default:
+        break;
+    }
+  }
+
+  /** A spirit called up by the rose: it fights beside you, then fades. */
+  stepSpirit(e, f) {
+    if (--e.life <= 0) { e.dead = true; this.fx(f, 'poof', e.x + 8, e.y + 8); return; }
+    let best = null, bd = Infinity;
+    for (const o of f.ents) {
+      if (o.dead || !isMob(o.kind) || isNpc(o.kind)) continue;
+      const d = dist2(o.x, o.y, e.x, e.y);
+      if (d < bd) { bd = d; best = o; }
+    }
+    if (!best) {
+      // nothing to fight: drift back to whoever called you
       const owner = this.players.get(e.owner);
-      if (owner && rectsOverlap(e.x + 4, e.y + 4, 8, 8,
-                                owner.x + PLAYER_BOX.x, owner.y + PLAYER_BOX.y,
-                                PLAYER_BOX.w, PLAYER_BOX.h)) {
-        e.dead = true;
-        this.addToBag(owner, { type: ITEM.MISSILE, kind: e.missile, amount: 1 });
-        this.metaDirty = true;
-        return;
+      if (owner && dist2(owner.x, owner.y, e.x, e.y) > 40 * 40) {
+        const dx = owner.x - e.x, dy = owner.y - e.y;
+        const d = Math.max(1, Math.hypot(dx, dy));
+        moveActor(e, (dx / d) * 1.8, (dy / d) * 1.8, f.tiles, e.box, MODE.FLY, true);
       }
+      return;
     }
-
-    if (boxBlocked(f.tiles, e.x + e.box.x, e.y + e.box.y, e.box.w, e.box.h, MODE.SHOT) ||
-        e.travelled > e.range * (def.returns ? 1.6 : 1) || e.t > 240) {
-      return this.landMissile(e, f);
+    const dx = best.x - e.x, dy = best.y - e.y;
+    const d = Math.max(1, Math.hypot(dx, dy));
+    e.dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? E : W) : (dy > 0 ? S : N);
+    if (bd > 16 * 16) {
+      moveActor(e, (dx / d) * 2.1, (dy / d) * 2.1, f.tiles, e.box, MODE.FLY, true);
+      clampToLevel(e, e.box);
+    } else if (e.cd <= 0) {
+      e.cd = 26;
+      this.hurtMob(best, e.dmg, e.dir, f, this.players.get(e.owner));
+      this.fx(f, 'clang', best.x + 8, best.y + 8);
     }
+    if (e.cd > 0) e.cd--;
   }
 
-  /** What is left of a throw comes to rest on the floor. */
-  landMissile(e, f) {
-    e.dead = true;
-    const def = MISSILES[e.missile];
-    this.fx(f, 'fizzle', e.x + 8, e.y + 8);
-    if (Math.random() > (def.keep ?? 0.7)) return;      // it broke
-    const at = tileUnder(e, e.box);
-    const spot = passable(f.tiles[at]) ? at : null;
-    if (spot === null) return;
-    this.dropItem(f, spot, { type: ITEM.MISSILE, kind: e.missile, amount: 1 });
-  }
+  /**
+   * Throw one of whatever is in that slot."""),
 
-  /** The nearest monster roughly in front of the hero. */"""),
-
-  ("      case KIND.WARD: return this.stepWard(e, f);",
-   "      case KIND.WARD: return this.stepWard(e, f);\n      case KIND.THROWN: return this.stepThrown(e, f, players);"),
+  ("      case KIND.THROWN: return this.stepThrown(e, f, players);",
+   "      case KIND.THROWN: return this.stepThrown(e, f, players);\n      case KIND.SPIRIT: return this.stepSpirit(e, f);"),
 )
 
 print('done')

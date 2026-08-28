@@ -215,6 +215,7 @@ function playKeys(ev) {
   if (panel) return panelKeys(ev);
   switch (ev.type) {
     case 'act': net.act(); audio.sfx('menu'); break;
+    case 'artifact': net.invOp('artifact', 0); audio.sfx('select'); break;
     case 'slot': net.useSlot(ev.n); break;
     case 'start': net.act(); break;
     case 'pack': openPanel('inv'); break;

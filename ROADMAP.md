@@ -30,37 +30,37 @@ wands and mob abilities all just apply one.
   stays exact.
 - Buff icons along the status bar.
 
-## Wave 2 — the item classes that are missing — **next**
+## Wave 2 — the item classes that are missing — **done**
 
-**Rings** (12 in SPD). Two ring slots, unidentified until worn a while,
-upgradeable, sometimes cursed. Accuracy, evasion, elements, energy, force,
-furor, haste, might, sharpshooting, tenacity, wealth, arcana.
+**Rings** — *shipped: 12.* Two slots. Each nudges the same stat block the perk
+trees write into, so rings and perks simply add up. Which stone means which
+ring is shuffled per run; you learn by wearing one long enough, which is also
+long enough for a cursed one to have been a bad idea.
 
-**Wands** (14). Charges that refill over time, aimed in a direction. Magic
-missile, fireblast, frost, lightning, disintegration, corrosion, blast wave,
-living earth, transfusion, regrowth, corruption, warding, prismatic light.
+**Wands** — *shipped: 12.* Charges that refill while you carry them, faster
+with a ring of energy, all at once from a scroll of recharging. Pointed with
+your facing rather than a cursor. Living earth was dropped; warding leaves a
+shard behind that shoots for you, which covers the same ground better.
 
-**Artifacts** (15). One slot, level up through use rather than scrolls. Cloak of
-shadows, horn of plenty, chalice of blood, talisman of foresight, timekeeper's
-hourglass, cape of thorns, dried rose, ethereal chains, alchemist's toolkit,
-lloyd's beacon, master thief's armband, sandals of nature, unstable spellbook.
+**Artifacts** — *shipped: 12.* One slot, fired with its own key, and no scroll
+will improve them: each grows on what you feed it — charges spent, grass walked
+through, secrets found, blood given, gold counted. Only one of each per run.
+The alchemist's toolkit waits on Wave 5's alchemy.
 
-**Missile weapons** (16). Thrown, with durability. Stones, knives, spears,
-spikes, shuriken, javelins, bolas, tomahawks, tridents, force cubes,
-boomerangs.
+**Missile weapons** — *shipped: 10.* Thrown where you face. A missile is a real
+object: it flies, it lands, and you walk over and pick it up again, or find it
+snapped in half. A boomerang lands back in your hand instead.
 
-**Enchantments** (13) **and glyphs** (13). Blazing, chilling, shocking,
-vampiric, grim, lucky, projecting, elastic, kinetic, blooming, corrupting,
-blocking, unstable — and antimagic, thorns, stone, entanglement, repulsion,
-camouflage, flow, obfuscation, potential, swiftness, viscosity, affection,
-brimstone.
+**Enchantments and glyphs** — *shipped: 13 and 13.* Each is a hook called at
+one moment — a blow landing, a blow taken, or the thing simply being worn —
+and most do their work by applying a buff.
 
-**Curses.** Cursed gear that cannot be removed and misbehaves, plus the scroll
-that lifts them.
+**Curses** — *shipped: 12.* Six for weapons, six for armour, and cursed rings
+run their own effect backwards. None of it comes off until a scroll of remove
+curse lifts it, or an upgrade happens to loosen it.
 
-**The rest of the potion and scroll lists.** Missing: experience, levitation,
-liquid flame, mind vision, purity — and identify variants, lullaby, mirror
-image, retribution, transmutation, remove curse.
+**The rest of the potion and scroll lists** — *shipped in Wave 1.* Both are at
+the full twelve.
 
 ## Wave 3 — the floors themselves — **done**
 
@@ -94,7 +94,7 @@ treasure (extra drops and a prize), trapped (a second helping of traps), and
 dark (sight radius cut by three, which now bites indoors too — a lit room no
 longer reveals further than you can see).
 
-## Wave 4 — actors
+## Wave 4 — actors — **next**
 
 **A mob roster that matches the source** per chapter, including the variants:
 albino rat, caustic slime, hermit crab, great crab, armoured brute, gnoll

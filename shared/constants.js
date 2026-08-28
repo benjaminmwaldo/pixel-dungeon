@@ -45,6 +45,7 @@ export const KIND = {
 
   // world 60+
   ITEM: 60, BOMB: 61, BLAST: 62, POOF: 63, GAS: 64, WARD: 65, THROWN: 66,
+  SPIRIT: 67,
 };
 
 export const MOB_MIN = 1, MOB_MAX = 39;

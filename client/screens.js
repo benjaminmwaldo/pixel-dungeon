@@ -8,6 +8,7 @@ import { ENCHANTS, GLYPHS, CURSES } from '../shared/enchants.js';
 import { RINGS, RING_TINT } from '../shared/rings.js';
 import { WANDS, WAND_TINT } from '../shared/wands.js';
 import { MISSILES, missilePower } from '../shared/missiles.js';
+import { ARTIFACTS, artMax } from '../shared/artifacts.js';
 import { TREES, PERKS, perksInTree, treesFor, canTake } from '../shared/perks.js';
 import { IMG, blit, text, textCentered, textWidth, potionImg, ringImg, wandImg } from './art/bake.js';
 
@@ -47,6 +48,7 @@ export function iconFor(item, st) {
     case ITEM.WAND:
       return wandImg(WAND_TINT[st.app?.wandLook?.[item.kind]] || '#FCFCFC');
     case ITEM.MISSILE: return IMG.MISSILE;
+    case ITEM.ARTIFACT: return IMG.ARTIFACT;
     default: return null;
   }
 }
@@ -114,6 +116,12 @@ function describe(item, st, short = false) {
     case ITEM.MISSILE: {
       const def = MISSILES[item.kind];
       return def ? `${missilePower(def, st.depth || 1, 0)} DAMAGE  -  ${def.blurb}` : '';
+    }
+    case ITEM.ARTIFACT: {
+      const def = ARTIFACTS[item.kind];
+      if (!def) return '';
+      const bar = def.max ? `${item.charge ?? 0}/${artMax(def, item.level || 0)}  -  ` : '';
+      return `${bar}${def.blurb}`;
     }
     case ITEM.WAND: {
       const def = WANDS[item.kind];
@@ -184,41 +192,43 @@ export function drawInventory(R, st, ui) {
   }
 
   // --- what you are wearing ----------------------------------------------
-  const ex = 174, ey = 26;
+  const ex = 174, ey = 22;
   text(g, 'WORN', ex, ey - 8, 'grey', 6);
   const worn = [
     ['weapon', st.equip?.weapon, ITEM.WEAPON, IMG.SWORD_ICON],
     ['armor', st.equip?.armor, ITEM.ARMOR, IMG.ARMOR_ICON],
     ['ring1', st.equip?.ring1, ITEM.RING, null],
     ['ring2', st.equip?.ring2, ITEM.RING, null],
+    ['artifact', st.equip?.artifact, ITEM.ARTIFACT, IMG.ARTIFACT],
   ];
-  const ROW = 19;   // four slots and a hero summary have to share the column
+  const ROW = 17;   // five slots and a hero summary have to share the column
   worn.forEach(([which, item, kind, icon], i) => {
     const y = ey + i * ROW;
     const sel = ui.cursor === -1 - i;
-    box(g, ex, y, 136, 18, sel ? '#243055' : C.dim, sel ? C.gold : C.frame);
+    box(g, ex, y, 136, 16, sel ? '#243055' : C.dim, sel ? C.gold : C.frame);
     const slotIcon = icon || (item
       ? ringImg(RING_TINT[st.app?.ringLook?.[item.kind]] || '#FCFCFC')
       : null);
     if (slotIcon) blit(g, slotIcon, ex + 2, y + 2);
     if (!item) {
-      text(g, kind === ITEM.RING ? 'NO RING' : '', ex + 20, y + 5, 'dark', 6);
+      text(g, kind === ITEM.RING ? 'NO RING' : kind === ITEM.ARTIFACT ? 'NO ARTIFACT' : '',
+        ex + 20, y + 4, 'dark', 6);
       return;
     }
     {
       const full = { ...item, type: kind };
       const name = itemLabel(full, st.app, st.known || { potions: [], scrolls: [] });
       const tint = item.known && item.curse ? 'red' : (sel ? 'white' : 'grey');
-      text(g, fit(name, 136 - 22, 6), ex + 20, y + 2, tint, 6);
-      text(g, fit(describe(full, st, true), 136 - 22, 5), ex + 20, y + 10, 'dark', 5);
+      text(g, fit(name, 136 - 22, 6), ex + 20, y + 1, tint, 6);
+      text(g, fit(describe(full, st, true), 136 - 22, 5), ex + 20, y + 9, 'dark', 5);
     }
   });
 
   // --- a quick read on the hero ------------------------------------------
-  const sy = ey + worn.length * ROW + 4;
+  const sy = ey + worn.length * ROW + 2;
   text(g, `${CLASSES[st.me.cls]?.name || ''}  LEVEL ${st.me.level}`, ex, sy, 'blue', 6);
-  text(g, `HEALTH   ${st.me.hp}/${st.me.maxHp}`, ex, sy + 9, 'white', 6);
-  text(g, `PERK POINTS  ${st.perkPoints || 0}`, ex, sy + 18,
+  text(g, `HEALTH   ${st.me.hp}/${st.me.maxHp}`, ex, sy + 8, 'white', 6);
+  text(g, `PERK POINTS  ${st.perkPoints || 0}`, ex, sy + 16,
     (st.perkPoints || 0) > 0 ? 'gold' : 'grey', 6);
 
   // --- the selected thing -------------------------------------------------
@@ -243,6 +253,9 @@ function actionHint(item, ui) {
   if (item.type === ITEM.WEAPON || item.type === ITEM.ARMOR) return 'ENTER TO WEAR IT';
   if (item.type === ITEM.KEY || item.type === ITEM.GOLDKEY) return 'USED BY WALKING INTO A LOCKED DOOR';
   if (item.type === ITEM.MISSILE) return 'ENTER TO THROW ONE WHERE YOU FACE';
+  if (item.type === ITEM.ARTIFACT) {
+    return ARTIFACTS[item.kind]?.active ? 'Q USES IT, WHEREVER YOU ARE' : 'IT WORKS ON ITS OWN';
+  }
   if (item.type === ITEM.WAND) {
     return (item.charges ?? 0) > 0 ? 'ENTER TO POINT IT WHERE YOU FACE' : 'SPENT - IT WILL FILL BACK UP';
   }
@@ -253,6 +266,7 @@ function actionHint(item, ui) {
 export const WORN_SLOTS = [
   ['weapon', ITEM.WEAPON], ['armor', ITEM.ARMOR],
   ['ring1', ITEM.RING], ['ring2', ITEM.RING],
+  ['artifact', ITEM.ARTIFACT],
 ];
 
 export function selectedItem(st, ui) {

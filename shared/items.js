@@ -7,11 +7,13 @@ import { dressGear, markName } from './enchants.js';
 import { RINGS, RING_IDS, RING_LOOKS, rollRing } from './rings.js';
 import { WANDS, WAND_IDS, WAND_LOOKS, rollWand } from './wands.js';
 import { MISSILES, rollMissile } from './missiles.js';
+import { ARTIFACTS, rollArtifact } from './artifacts.js';
 
 export const ITEM = {
   GOLD: 'gold', FOOD: 'food', POTION: 'potion', SCROLL: 'scroll',
   WEAPON: 'weapon', ARMOR: 'armor', KEY: 'key', GOLDKEY: 'goldkey',
   BOMB: 'bomb', RELIC: 'relic', RING: 'ring', WAND: 'wand', MISSILE: 'missile',
+  ARTIFACT: 'artifact',
 };
 
 // The twelve the original carries.
@@ -99,6 +101,11 @@ export function itemLabel(item, app, known) {
       return known.scrolls.includes(item.kind)
         ? `SCROLL OF ${item.kind.toUpperCase()}`
         : `SCROLL "${app.scrollLook[item.kind]}"`;
+    case ITEM.ARTIFACT: {
+      const def = ARTIFACTS[item.kind];
+      if (!def) return 'A CURIOUS THING';
+      return item.level ? `${def.name} +${item.level}` : def.name;
+    }
     case ITEM.MISSILE: {
       const def = MISSILES[item.kind];
       const n = item.amount || 1;
@@ -146,7 +153,7 @@ export function isPointed(item) {
 /** Something you put on rather than use up. */
 export function isWorn(item) {
   return item?.type === ITEM.WEAPON || item?.type === ITEM.ARMOR ||
-         item?.type === ITEM.RING;
+         item?.type === ITEM.RING || item?.type === ITEM.ARTIFACT;
 }
 
 /** A stack key, so five rations occupy one slot. */
@@ -155,6 +162,7 @@ export function stackKey(item) {
   if (item.type === ITEM.MISSILE) return `missile:${item.kind}`;
   if (item.type === ITEM.RING) return `ring:${item.kind}:${item.upgrade || 0}`;
   if (item.type === ITEM.WAND) return `wand:${item.kind}:${item.upgrade || 0}:${item.serial || 0}`;
+  if (item.type === ITEM.ARTIFACT) return `artifact:${item.kind}`;
   return item.type;
 }
 
@@ -191,15 +199,20 @@ export function rollLoot(depth, rng, { rich = false } = {}) {
 }
 
 /** Something worth the walk — used for pedestals, vaults and bosses. */
-export function rollPrize(depth, rng) {
+export function rollPrize(depth, rng, seen = []) {
   const r = rng.next();
   const tier = clampTier(Math.ceil(depth / 5) + 1);
   if (r < 0.28) return blessed({ type: ITEM.WEAPON, tier, upgrade: rng.range(1, 2) }, depth, rng);
   if (r < 0.56) return blessed({ type: ITEM.ARMOR, tier, upgrade: rng.range(1, 2) }, depth, rng);
-  if (r < 0.68) return { type: ITEM.SCROLL, kind: SCROLL.UPGRADE };
-  if (r < 0.74) return { ...rollRing(depth, rng), cursed: false };
-  if (r < 0.82) return rollWand(depth, rng);
-  if (r < 0.90) return { type: ITEM.POTION, kind: POTION.STRENGTH };
+  if (r < 0.64) return { type: ITEM.SCROLL, kind: SCROLL.UPGRADE };
+  if (r < 0.70) return { ...rollRing(depth, rng), cursed: false };
+  if (r < 0.76) return rollWand(depth, rng);
+  if (r < 0.86 && depth >= 4) {
+    // one of these is worth more than anything else on the pedestal
+    const art = rollArtifact(depth, rng, seen);
+    if (art) return art;
+  }
+  if (r < 0.92) return { type: ITEM.POTION, kind: POTION.STRENGTH };
   return { type: ITEM.GOLD, amount: rng.range(60, 60 + depth * 12) };
 }
 
@@ -235,6 +248,7 @@ export function itemValue(item) {
     case ITEM.KEY: case ITEM.GOLDKEY: return 0;
     case ITEM.POTION: return item.kind === POTION.STRENGTH ? 300 : 45;
     case ITEM.SCROLL: return item.kind === SCROLL.UPGRADE ? 300 : 45;
+    case ITEM.ARTIFACT: return 400 + (item.level || 0) * 80;
     case ITEM.MISSILE: return (MISSILES[item.kind]?.dmg || 3) * 5 * (item.amount || 1);
     case ITEM.RING: return 200 + (item.upgrade || 0) * 60;
     case ITEM.WAND: return 220 + (item.upgrade || 0) * 70;

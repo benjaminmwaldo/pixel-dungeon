@@ -51,6 +51,7 @@ export class Input {
 
     switch (e.code) {
       case 'KeyE': case 'Space': this.emit({ type: 'act' }); break;
+      case 'KeyQ': this.emit({ type: 'artifact' }); break;
       case 'KeyI': this.emit({ type: 'pack' }); break;
       case 'KeyK': this.emit({ type: 'skills' }); break;
       case 'Tab': this.emit({ type: 'tab' }); break;

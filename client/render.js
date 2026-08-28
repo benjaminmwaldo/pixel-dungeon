@@ -51,6 +51,8 @@ const MOB_SPRITE = {
   [KIND.EYE]: ['EYE1', 'EYE2'],
   [KIND.SCORPIO]: ['SCORPIO1', 'SCORPIO2'],
   [KIND.SHEEP]: ['SHEEP1', 'SHEEP2'],
+  [KIND.SHOPKEEPER]: ['SHOPKEEPER1', 'SHOPKEEPER2'],
+  [KIND.MIMIC]: ['MIMIC1', 'MIMIC2'],
   [KIND.BOSS_GLUT]: ['BOSS_GLUT1', 'BOSS_GLUT2'],
   [KIND.BOSS_WARDEN]: ['BOSS_WARDEN1', 'BOSS_WARDEN2'],
   [KIND.BOSS_TYRANT]: ['BOSS_TYRANT1', 'BOSS_TYRANT2'],
@@ -255,6 +257,13 @@ export class Renderer {
     const shot = SHOT_SPRITE[e.kind];
     if (shot) { blit(g, IMG[shot], e.x, e.y); return; }
 
+    if (e.kind === KIND.SPIRIT) {
+      const spr = ((f >> 3) & 1) ? IMG.SPIRIT2 : IMG.SPIRIT1;
+      g.globalAlpha = 0.7;
+      blit(g, spr, e.x - 3, e.y - 5);
+      g.globalAlpha = 1;
+      return;
+    }
     if (e.kind === KIND.THROWN) {
       blit(g, IMG.THROWN, e.x, e.y);
       return;
@@ -326,6 +335,7 @@ export class Renderer {
         return wandImg(WAND_TINT[look] || '#FCFCFC');
       }
       case ITEM.MISSILE: return IMG.MISSILE;
+      case ITEM.ARTIFACT: return IMG.ARTIFACT;
       default: return null;
     }
   }
