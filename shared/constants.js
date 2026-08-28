@@ -35,7 +35,7 @@ export const KIND = {
   SHEEP: 21,
 
   // townsfolk, who happen to live very far underground
-  SHOPKEEPER: 22,
+  SHOPKEEPER: 22, GHOST: 23, WANDMAKER: 24, BLACKSMITH: 25, IMP: 29,
 
   MIMIC: 26,
 
@@ -55,8 +55,8 @@ export const MOB_MIN = 1, MOB_MAX = 39;
 export const isMob = (k) => k >= MOB_MIN && k <= MOB_MAX;
 export const isBoss = (k) => k >= 30 && k <= 39;
 // Somebody who talks rather than bites.
-export const NPC_MIN = 22, NPC_MAX = 25;
-export const isNpc = (k) => k >= NPC_MIN && k <= NPC_MAX;
+const NPCS = new Set([22, 23, 24, 25, 29]);
+export const isNpc = (k) => NPCS.has(k);
 
 // ---------------------------------------------------------------------------
 // Hero classes — one per player slot, so a full party covers every role.

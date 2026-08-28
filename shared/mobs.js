@@ -60,6 +60,24 @@ export const MOBS = {
     ai: 'chase', box: BIG, armour: 2,
   },
 
+  // The four people down here who want something rather than your blood.
+  [KIND.GHOST]: {
+    name: 'A SAD GHOST', sprite: 'NPC_GHOST', hp: 999, dmg: 0, speed: 0, xp: 0,
+    ai: 'idle', box: BIG, harmless: true, npc: true,
+  },
+  [KIND.WANDMAKER]: {
+    name: 'THE OLD WANDMAKER', sprite: 'NPC_WAND', hp: 999, dmg: 0, speed: 0, xp: 0,
+    ai: 'idle', box: BIG, harmless: true, npc: true,
+  },
+  [KIND.BLACKSMITH]: {
+    name: 'THE BLACKSMITH', sprite: 'NPC_SMITH', hp: 999, dmg: 0, speed: 0, xp: 0,
+    ai: 'idle', box: BIG, harmless: true, npc: true,
+  },
+  [KIND.IMP]: {
+    name: 'AN AMBITIOUS IMP', sprite: 'NPC_IMP', hp: 999, dmg: 0, speed: 0, xp: 0,
+    ai: 'idle', box: BIG, harmless: true, npc: true,
+  },
+
   // A pylon: it does nothing but stand there and keep its master safe.
   [KIND.PYLON]: {
     name: 'PYLON', sprite: 'PYLON', hp: 40, dmg: 0, speed: 0, xp: 8,

@@ -53,6 +53,10 @@ const MOB_SPRITE = {
   [KIND.SCORPIO]: ['SCORPIO1', 'SCORPIO2'],
   [KIND.SHEEP]: ['SHEEP1', 'SHEEP2'],
   [KIND.SHOPKEEPER]: ['SHOPKEEPER1', 'SHOPKEEPER2'],
+  [KIND.GHOST]: ['NPC_GHOST1', 'NPC_GHOST2'],
+  [KIND.WANDMAKER]: ['NPC_WAND1', 'NPC_WAND2'],
+  [KIND.BLACKSMITH]: ['NPC_SMITH1', 'NPC_SMITH2'],
+  [KIND.IMP]: ['NPC_IMP1', 'NPC_IMP2'],
   [KIND.MIMIC]: ['MIMIC1', 'MIMIC2'],
   [KIND.PYLON]: ['PYLON1', 'PYLON2'],
   [KIND.FIST]: ['FIST1', 'FIST2'],
@@ -348,6 +352,7 @@ export class Renderer {
       }
       case ITEM.MISSILE: return IMG.MISSILE;
       case ITEM.ARTIFACT: return IMG.ARTIFACT;
+      case ITEM.QUEST: return IMG.AMULET;
       default: return null;
     }
   }
@@ -495,7 +500,11 @@ export class Renderer {
   banner(msg) {
     if (!msg) return;
     const g = this.ctx;
-    const w = textWidth(msg, 7) + 12;
+    // A long line — anything somebody says, mostly — drops to a smaller font
+    // rather than running off both sides of a 320-pixel screen.
+    let size = 7;
+    while (size > 5 && textWidth(msg, size) + 12 > SCREEN_W - 8) size--;
+    const w = Math.min(SCREEN_W - 4, textWidth(msg, size) + 12);
     const x = Math.round(SCREEN_W / 2 - w / 2);
     const y = HUD_H + 8;
     g.fillStyle = 'rgba(0,0,0,0.85)';
@@ -503,7 +512,7 @@ export class Renderer {
     g.fillStyle = C.gold;
     g.fillRect(x, y, w, 1);
     g.fillRect(x, y + 15, w, 1);
-    textCentered(g, msg, SCREEN_W / 2, y + 4, 'white', 7);
+    textCentered(g, msg, SCREEN_W / 2, y + 4 + (7 - size), 'white', size);
   }
 
   bossBanner() {

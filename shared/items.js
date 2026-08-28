@@ -13,7 +13,7 @@ export const ITEM = {
   GOLD: 'gold', FOOD: 'food', POTION: 'potion', SCROLL: 'scroll',
   WEAPON: 'weapon', ARMOR: 'armor', KEY: 'key', GOLDKEY: 'goldkey',
   BOMB: 'bomb', RELIC: 'relic', RING: 'ring', WAND: 'wand', MISSILE: 'missile',
-  ARTIFACT: 'artifact',
+  ARTIFACT: 'artifact', QUEST: 'quest',
 };
 
 // The twelve the original carries.
@@ -101,6 +101,7 @@ export function itemLabel(item, app, known) {
       return known.scrolls.includes(item.kind)
         ? `SCROLL OF ${item.kind.toUpperCase()}`
         : `SCROLL "${app.scrollLook[item.kind]}"`;
+    case ITEM.QUEST: return item.name || 'SOMETHING SOMEBODY WANTS';
     case ITEM.ARTIFACT: {
       const def = ARTIFACTS[item.kind];
       if (!def) return 'A CURIOUS THING';
@@ -163,6 +164,7 @@ export function stackKey(item) {
   if (item.type === ITEM.RING) return `ring:${item.kind}:${item.upgrade || 0}`;
   if (item.type === ITEM.WAND) return `wand:${item.kind}:${item.upgrade || 0}:${item.serial || 0}`;
   if (item.type === ITEM.ARTIFACT) return `artifact:${item.kind}`;
+  if (item.type === ITEM.QUEST) return `quest:${item.kind}`;
   return item.type;
 }
 
@@ -248,6 +250,7 @@ export function itemValue(item) {
     case ITEM.KEY: case ITEM.GOLDKEY: return 0;
     case ITEM.POTION: return item.kind === POTION.STRENGTH ? 300 : 45;
     case ITEM.SCROLL: return item.kind === SCROLL.UPGRADE ? 300 : 45;
+    case ITEM.QUEST: return 0;          // nobody but its owner wants it
     case ITEM.ARTIFACT: return 400 + (item.level || 0) * 80;
     case ITEM.MISSILE: return (MISSILES[item.kind]?.dmg || 3) * 5 * (item.amount || 1);
     case ITEM.RING: return 200 + (item.upgrade || 0) * 60;

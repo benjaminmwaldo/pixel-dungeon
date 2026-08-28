@@ -4,7 +4,7 @@ import { Renderer } from './render.js';
 import { Input } from './input.js';
 import { Net } from './net.js';
 import * as audio from './audio.js';
-import { TICK_MS, CLASS_ORDER, isBoss } from '../shared/constants.js';
+import { TICK_MS, CLASS_ORDER, isBoss, isNpc as isNpcKind } from '../shared/constants.js';
 import { itemLabel } from '../shared/items.js';
 import { TT, regionOf, LEVEL_W, LEVEL_H } from '../shared/terrain.js';
 import { drawInventory, drawPerks, moveNode, firstNode, WORN_SLOTS } from './screens.js';
@@ -359,6 +359,11 @@ function draw(now) {
 }
 
 function promptForTile(st) {
+  // somebody close enough to talk to
+  const who = st.ents?.find(e => isNpcKind(e.kind) &&
+    Math.abs(e.x - st.me.x) < 26 && Math.abs(e.y - st.me.y) < 26);
+  if (who) { renderer.prompt('E - SPEAK'); return; }
+
   // standing on something with a price tag
   const good = st.items?.find(e => e.price &&
     Math.abs(e.x - st.me.x) < 10 && Math.abs(e.y - st.me.y) < 10);

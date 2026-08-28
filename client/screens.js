@@ -49,6 +49,7 @@ export function iconFor(item, st) {
       return wandImg(WAND_TINT[st.app?.wandLook?.[item.kind]] || '#FCFCFC');
     case ITEM.MISSILE: return IMG.MISSILE;
     case ITEM.ARTIFACT: return IMG.ARTIFACT;
+    case ITEM.QUEST: return IMG.AMULET;
     default: return null;
   }
 }
@@ -117,6 +118,7 @@ function describe(item, st, short = false) {
       const def = MISSILES[item.kind];
       return def ? `${missilePower(def, st.depth || 1, 0)} DAMAGE  -  ${def.blurb}` : '';
     }
+    case ITEM.QUEST: return 'SOMEBODY ON THIS FLOOR IS WAITING FOR THIS';
     case ITEM.ARTIFACT: {
       const def = ARTIFACTS[item.kind];
       if (!def) return '';
@@ -252,6 +254,7 @@ function actionHint(item, ui) {
   if (ui.held !== null) return 'C AGAIN TO PLACE IT';
   if (item.type === ITEM.WEAPON || item.type === ITEM.ARMOR) return 'ENTER TO WEAR IT';
   if (item.type === ITEM.KEY || item.type === ITEM.GOLDKEY) return 'USED BY WALKING INTO A LOCKED DOOR';
+  if (item.type === ITEM.QUEST) return 'CARRY IT BACK TO WHOEVER ASKED';
   if (item.type === ITEM.MISSILE) return 'ENTER TO THROW ONE WHERE YOU FACE';
   if (item.type === ITEM.ARTIFACT) {
     return ARTIFACTS[item.kind]?.active ? 'Q USES IT, WHEREVER YOU ARE' : 'IT WORKS ON ITS OWN';
