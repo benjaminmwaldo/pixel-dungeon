@@ -49,6 +49,11 @@ export const MOBS = {
   // ---- harmless -----------------------------------------------------------
   [KIND.SHEEP]:    { name: 'SHEEP', sprite: 'SHEEP', hp: 4, dmg: 0, speed: 1.1, xp: 0, ai: 'wander', box: BOX, harmless: true },
 
+  [KIND.SHOPKEEPER]: {
+    name: 'SHOPKEEPER', sprite: 'SHOPKEEPER', hp: 999, dmg: 0, speed: 0, xp: 0,
+    ai: 'idle', box: BIG, harmless: true, npc: true,
+  },
+
   // ---- the five chapter bosses -----------------------------------------
   [KIND.BOSS_GLUT]: {
     name: 'GLUT, THE SWOLLEN', sprite: 'BOSS_GLUT', hp: 90, dmg: 8, speed: 1.1, xp: 60,

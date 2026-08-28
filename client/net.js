@@ -190,8 +190,8 @@ export class Net {
       time: performance.now(),
       ents: m.e.map(([id, kind, x, y, dir, flags, hp, maxHp]) =>
         ({ id, kind, x, y, dir, flags, hp, maxHp })),
-      items: m.it.map(([id, x, y, type, kind, tier, upgrade, amount]) =>
-        ({ id, x, y, type, kind, tier, upgrade, amount })),
+      items: m.it.map(([id, x, y, type, kind, tier, upgrade, amount, price]) =>
+        ({ id, x, y, type, kind, tier, upgrade, amount, price })),
       others: m.o.map(([id, x, y, dir, clsIdx, ghost, atk, hp, maxHp, walk, invis]) =>
         ({ id, x, y, dir, clsIdx, ghost: !!ghost, atk, hp, maxHp, walk, invis })),
     });

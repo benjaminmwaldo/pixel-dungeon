@@ -27,10 +27,25 @@ export const ROOM = {
   STATUARY: 'statuary',
   VAULT: 'vault',
   ARENA: 'arena',
+  SHOP: 'shop',
+  ARMORY: 'armory',
+  CRYPT: 'crypt',
+  POOL: 'pool',
+  TRAP_ROOM: 'trapRoom',
+  STORAGE: 'storage',
+  LABORATORY: 'laboratory',
+  WEAK_FLOOR: 'weakFloor',
 };
 
 // Special rooms only ever go in dead ends, so they never block the way down.
-const SPECIALS = [ROOM.TREASURE, ROOM.LIBRARY, ROOM.GARDEN, ROOM.WELL, ROOM.STATUARY];
+const SPECIALS = [
+  ROOM.TREASURE, ROOM.LIBRARY, ROOM.GARDEN, ROOM.WELL, ROOM.STATUARY,
+  ROOM.ARMORY, ROOM.CRYPT, ROOM.POOL, ROOM.TRAP_ROOM, ROOM.STORAGE,
+  ROOM.LABORATORY, ROOM.WEAK_FLOOR,
+];
+
+/** A shop opens on the first floor of each chapter after the sewers. */
+export const shopDepth = (d) => d === 6 || d === 11 || d === 16 || d === 21;
 
 // ---------------------------------------------------------------------------
 export function generate(depth, seed) {
@@ -99,6 +114,17 @@ function regularFloor(depth, rng) {
     .filter(i => rooms[i].links.size === 1 && rooms[i].type === ROOM.TUNNEL &&
                  roomW(rooms[i]) >= 4 && roomH(rooms[i]) >= 4);
   rng.shuffle(deadEnds);
+
+  // The shopkeeper wants a room with space to lay things out.
+  let shop = null;
+  if (shopDepth(depth)) {
+    const roomy = deadEnds.filter(i => roomW(rooms[i]) >= 5 && roomH(rooms[i]) >= 4);
+    if (roomy.length) {
+      shop = roomy[0];
+      deadEnds.splice(deadEnds.indexOf(shop), 1);
+      rooms[shop].type = ROOM.SHOP;
+    }
+  }
 
   let vault = null;
   if (deadEnds.length && depth > 1 && rng.chance(0.5)) {
@@ -185,7 +211,7 @@ function regularFloor(depth, rng) {
   return finish({
     depth, region: region.key, tiles, rooms,
     entrance: entIdx, exit: exitIdx,
-    vaultRoom: vault, keySpot, boss: false, traps,
+    vaultRoom: vault, keySpot, boss: false, traps, shopRoom: shop,
   }, rng);
 }
 
@@ -509,6 +535,47 @@ function decorateRoom(tiles, room, region, rng) {
     case ROOM.STATUARY:
       inner((x, y, i) => {
         if (tiles[i] === TT.FLOOR && (x + y) % 3 === 0 && rng.chance(0.5)) tiles[i] = TT.STATUE;
+      });
+      break;
+    case ROOM.SHOP:
+      inner((x, y, i) => { if (passable(tiles[i])) tiles[i] = TT.FLOOR_DECO; });
+      break;
+    case ROOM.ARMORY:
+      inner((x, y, i) => {
+        if (tiles[i] !== TT.FLOOR) return;
+        const edge = x === room.l + 1 || x === room.r - 1;
+        tiles[i] = edge && rng.chance(0.4) ? TT.STATUE : TT.FLOOR_DECO;
+      });
+      break;
+    case ROOM.CRYPT:
+      inner((x, y, i) => {
+        if (tiles[i] !== TT.FLOOR) return;
+        tiles[i] = (x + y) % 4 === 0 && rng.chance(0.6) ? TT.STATUE : TT.FLOOR_DECO;
+      });
+      break;
+    case ROOM.POOL:
+      inner((x, y, i) => {
+        const edge = x === room.l + 1 || x === room.r - 1 ||
+                     y === room.t + 1 || y === room.b - 1;
+        if (!edge && passable(tiles[i])) tiles[i] = TT.WATER;
+      });
+      break;
+    case ROOM.TRAP_ROOM:
+      inner((x, y, i) => { if (tiles[i] === TT.FLOOR) tiles[i] = TT.FLOOR_DECO; });
+      break;
+    case ROOM.LABORATORY:
+      inner((x, y, i) => {
+        if (tiles[i] !== TT.FLOOR) return;
+        const edge = x === room.l + 1 || y === room.t + 1;
+        tiles[i] = edge && rng.chance(0.5) ? TT.BOOKSHELF : TT.FLOOR_DECO;
+      });
+      break;
+    case ROOM.WEAK_FLOOR:
+      inner((x, y, i) => { if (tiles[i] === TT.FLOOR) tiles[i] = TT.CRACKED; });
+      break;
+    case ROOM.STORAGE:
+      inner((x, y, i) => {
+        if (tiles[i] === TT.FLOOR) tiles[i] = rng.chance(0.25) ? TT.RUBBLE : TT.FLOOR_DECO;
       });
       break;
     case ROOM.TREASURE:

@@ -158,3 +158,44 @@ export function rollDrop(depth, rng) {
 }
 
 function clampTier(t) { return t < 1 ? 1 : t > 5 ? 5 : t; }
+
+/** Roughly what a shopkeeper thinks something is worth. */
+export function itemValue(item) {
+  if (!item) return 0;
+  switch (item.type) {
+    case ITEM.GOLD: return item.amount || 0;
+    case ITEM.FOOD: return 25;
+    case ITEM.BOMB: return 30 * (item.amount || 1);
+    case ITEM.KEY: case ITEM.GOLDKEY: return 0;
+    case ITEM.POTION: return item.kind === POTION.STRENGTH ? 300 : 45;
+    case ITEM.SCROLL: return item.kind === SCROLL.UPGRADE ? 300 : 45;
+    case ITEM.WEAPON:
+    case ITEM.ARMOR: {
+      const t = item.tier || 1;
+      return 25 * t * t + (item.upgrade || 0) * 45;
+    }
+    default: return 20;
+  }
+}
+
+export const buyPrice = (item) => Math.max(10, Math.round(itemValue(item) * 1.6));
+export const sellPrice = (item) => Math.round(itemValue(item) * 0.4);
+
+/** What a shop at this depth has on its shelves. */
+export function rollStock(depth, rng) {
+  const tier = clampTier(Math.ceil(depth / 5));
+  const stock = [
+    { type: ITEM.FOOD },
+    { type: ITEM.FOOD },
+    { type: ITEM.BOMB, amount: 2 },
+    { type: ITEM.POTION, kind: POTION.HEALING },
+    { type: ITEM.POTION, kind: rng.pick(COMMON_POTIONS) },
+    { type: ITEM.SCROLL, kind: SCROLL.IDENTIFY },
+    { type: ITEM.SCROLL, kind: rng.pick(COMMON_SCROLLS) },
+    { type: ITEM.WEAPON, tier: clampTier(tier + 1), upgrade: 0 },
+    { type: ITEM.ARMOR, tier: clampTier(tier + 1), upgrade: 0 },
+  ];
+  if (rng.chance(0.5)) stock.push({ type: ITEM.SCROLL, kind: SCROLL.UPGRADE });
+  if (rng.chance(0.35)) stock.push({ type: ITEM.POTION, kind: POTION.STRENGTH });
+  return rng.shuffle(stock);
+}

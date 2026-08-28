@@ -6,13 +6,13 @@ import {
   TILE, KIND, CLASSES, CLASS_ORDER, PLAYER_BOX, INVULN_TICKS,
   KNOCKBACK_TICKS, KNOCKBACK_SPEED, REVIVE_TICKS, GHOST_TICKS, MAX_PLAYERS,
   XP_PER_LEVEL, HP_PER_LEVEL, HUNGER_MAX, HUNGER_HURT, N, E, S, W, DX, DY,
-  isMob, isBoss, rectsOverlap, clamp, dist2,
+  isMob, isBoss, isNpc, rectsOverlap, clamp, dist2,
 } from './constants.js';
 import {
   LEVEL_W, LEVEL_LEN, TT, idx, tx, ty, inBounds, passable,
   regionOf, rngFor, MAX_DEPTH, REGIONS,
 } from './terrain.js';
-import { generate } from './levelgen.js';
+import { generate, ROOM } from './levelgen.js';
 import { viewFrom, hasLine } from './fov.js';
 import {
   MODE, moveActor, boxBlocked, tileUnder, centreTile, tileToPixel, clampToLevel,
@@ -22,12 +22,13 @@ import { MOBS, SPAWNS, BOSS_OF, mobBudget, scaleFor, HEARING } from './mobs.js';
 import {
   ITEM, POTION, SCROLL, POTION_KINDS, SCROLL_KINDS, makeAppearances,
   rollLoot, rollPrize, rollDrop, WEAPONS, ARMORS, isConsumable, stackKey,
+  itemLabel, buyPrice, sellPrice, rollStock,
 } from './items.js';
 import { computeStats, canTake, clientMods, PERKS } from './perks.js';
 import { toBase64 } from './b64.js';
 import * as BF from './buffs.js';
 import { B } from './buffs.js';
-import { TRAPS, TRAP, trapIndex } from './traps.js';
+import { TRAPS, TRAP, trapIndex, rollTrap } from './traps.js';
 
 const QUICK_SLOTS = 8;
 const BAG_BASE = 16;
@@ -426,6 +427,18 @@ export class Game {
       f.set(i, TT.TRAP_SPENT);
       this.springTrap(p, f, i);
     }
+
+    if (t === TT.CRACKED) {
+      f.set(i, TT.CHASM);
+      this.fx(f, 'blast', p.x + 8, p.y + 8);
+      if (p.effects?.fly) {
+        this.banner('THE FLOOR FALLS AWAY BENEATH YOU', 1500);
+      } else {
+        this.banner('THE FLOOR GIVES WAY', 1500);
+        this.hurtPlayer(p, 2 + Math.floor(p.depth / 3), p.x + 8, p.y + 8, null, true);
+        if (!p.dead && !p.ghost) this.descend(p, true);
+      }
+    }
     // a rogue — or anyone trapwise — reads the floor before standing on it
     const reach = Math.max(p.cls === 'rogue' ? 2 : 0, p.stats.search);
     if (reach > 0) {
@@ -529,6 +542,7 @@ export class Game {
     for (const e of f.ents) {
       if (e.dead || e.kind !== KIND.ITEM || e.t < 6) continue;
       if (!rectsOverlap(p.x + 2, p.y + 2, 12, 12, e.x + 2, e.y + 2, 12, 12)) continue;
+      if (e.price) continue;   // pay for it first
       if (this.take(p, f, e.item)) e.dead = true;
     }
   }
@@ -600,9 +614,163 @@ export class Game {
     const item = { ...slot.item };
     if (isConsumable(item) && slot.count > 1) { item.amount = 1; slot.count--; }
     else { if (isConsumable(item)) item.amount = slot.count; p.bag[n] = null; }
+    if (this.inShop(f, tileUnder(p, PLAYER_BOX))) {
+      const paid = sellPrice(item);
+      if (paid > 0) {
+        p.gold += paid;
+        this.fx(f, 'gold', p.x + 8, p.y + 8);
+        this.banner(`SOLD FOR ${paid} GOLD`, 1300);
+        this.metaDirty = true;
+        return;
+      }
+      this.banner('THE SHOPKEEPER WAVES IT AWAY', 1300);
+    }
     this.dropItem(f, tileUnder(p, PLAYER_BOX), item);
     this.fx(f, 'pickup', p.x + 8, p.y + 8);
     this.metaDirty = true;
+  }
+
+  /** Is this tile inside the shop on this floor? */
+  inShop(f, tile) {
+    const n = f.level.shopRoom;
+    if (n === null || n === undefined) return false;
+    const r = f.level.rooms[n];
+    const x = tx(tile), y = ty(tile);
+    return x > r.l && x < r.r && y > r.t && y < r.b;
+  }
+
+  /** Hand over the gold, take the goods. */
+  buy(p, f, e) {
+    if (p.gold < e.price) {
+      this.banner(`YOU NEED ${e.price - p.gold} MORE GOLD`, 1500);
+      return;
+    }
+    if (!this.take(p, f, e.item)) return;   // pack full: no sale
+    p.gold -= e.price;
+    e.dead = true;
+    this.fx(f, 'gold', p.x + 8, p.y + 8);
+    this.banner(`BOUGHT ${itemLabel(e.item, this.app, this.known)}`, 1500);
+    this.metaDirty = true;
+  }
+
+  /** Fill the special rooms with whatever it is they promise. */
+  furnish(f) {
+    for (const room of f.level.rooms) {
+      const spots = this.roomSpots(f, room);
+      if (!spots.length) continue;
+      const rng = f.rng;
+      const take = () => spots.length ? spots.splice(rng.int(spots.length), 1)[0] : null;
+
+      switch (room.type) {
+        case ROOM.ARMORY: {
+          const tier = Math.min(5, Math.ceil(f.depth / 5) + 1);
+          this.dropItem(f, take(), { type: ITEM.WEAPON, tier, upgrade: rng.chance(0.4) ? 1 : 0 });
+          this.dropItem(f, take(), { type: ITEM.ARMOR, tier, upgrade: rng.chance(0.4) ? 1 : 0 });
+          break;
+        }
+        case ROOM.CRYPT: {
+          // grave goods, and the previous owners
+          this.dropItem(f, take(), rollPrize(f.depth, rng));
+          const guards = 2 + rng.int(2);
+          for (let n = 0; n < guards; n++) {
+            const at = take();
+            if (at === null) break;
+            const px = tileToPixel(at, MOBS[KIND.SKELETON].box);
+            const e = this.spawnMob(f, KIND.SKELETON, px.x, px.y);
+            if (e) e.hidden = true;
+          }
+          break;
+        }
+        case ROOM.LABORATORY: {
+          for (let n = 0; n < 3; n++) {
+            const at = take();
+            if (at === null) break;
+            this.dropItem(f, at, rng.chance(0.5)
+              ? { type: ITEM.POTION, kind: POTION_KINDS[rng.int(POTION_KINDS.length)] }
+              : { type: ITEM.SCROLL, kind: SCROLL_KINDS[rng.int(SCROLL_KINDS.length)] });
+          }
+          break;
+        }
+        case ROOM.STORAGE: {
+          const crates = 3 + rng.int(3);
+          for (let n = 0; n < crates; n++) {
+            const at = take();
+            if (at === null) break;
+            this.dropItem(f, at, rollLoot(f.depth, rng));
+          }
+          break;
+        }
+        case ROOM.POOL: {
+          // something lives in the water
+          const at = take();
+          if (at !== null) {
+            const px = tileToPixel(at, MOBS[KIND.CRAB].box);
+            const e = this.spawnMob(f, KIND.CRAB, px.x, px.y);
+            if (e) { e.hp = e.maxHp = Math.round(e.maxHp * 1.6); e.hidden = true; }
+          }
+          this.dropItem(f, take(), rollPrize(f.depth, rng));
+          break;
+        }
+        case ROOM.TRAP_ROOM: {
+          // the prize sits in the middle of a minefield
+          f.level.traps ??= {};
+          const centre = idx(Math.floor((room.l + room.r) / 2),
+                             Math.floor((room.t + room.b) / 2));
+          for (const i of this.roomSpots(f, room)) {
+            if (i === centre) continue;
+            if (!rng.chance(0.55)) continue;
+            f.set(i, TT.TRAP_HIDDEN);
+            f.level.traps[i] = rollTrap(f.depth, rng);
+          }
+          if (passable(f.tiles[centre])) this.dropItem(f, centre, rollPrize(f.depth, rng));
+          break;
+        }
+        default: break;
+      }
+    }
+  }
+
+  /** The tiles inside a room that something can stand on. */
+  roomSpots(f, room) {
+    const out = [];
+    for (let y = room.t + 1; y <= room.b - 1; y++) {
+      for (let x = room.l + 1; x <= room.r - 1; x++) {
+        const i = idx(x, y);
+        const t = f.tiles[i];
+        if (t === TT.FLOOR || t === TT.FLOOR_DECO || t === TT.GRASS) out.push(i);
+      }
+    }
+    return out;
+  }
+
+  /** Lay out the shelves and put someone behind them. */
+  stockShop(f) {
+    const n = f.level.shopRoom;
+    if (n === null || n === undefined) return;
+    const room = f.level.rooms[n];
+    const spots = [];
+    for (let y = room.t + 1; y <= room.b - 1; y++) {
+      for (let x = room.l + 1; x <= room.r - 1; x++) {
+        const i = idx(x, y);
+        if (passable(f.tiles[i]) && f.tiles[i] !== TT.DOOR &&
+            f.tiles[i] !== TT.OPEN_DOOR) spots.push(i);
+      }
+    }
+    if (spots.length < 4) return;
+
+    // the keeper stands in the middle, the stock goes around the walls
+    const keep = spots.splice(Math.floor(spots.length / 2), 1)[0];
+    const at = tileToPixel(keep, MOBS[KIND.SHOPKEEPER].box);
+    const keeper = this.spawnMob(f, KIND.SHOPKEEPER, at.x, at.y);
+    f.shopkeeper = keeper?.id ?? null;
+
+    const stock = rollStock(f.depth, f.rng);
+    f.rng.shuffle(spots);
+    for (let k = 0; k < stock.length && k < spots.length; k++) {
+      const item = stock[k];
+      const e = this.dropItem(f, spots[k], item);
+      if (e) e.price = buyPrice(item);
+    }
   }
 
   swapSlots(p, a, b) {
@@ -921,6 +1089,11 @@ export class Game {
       this.banner('THE WELL RESTORES YOU', 1600);
       return;
     }
+    // a price tag under your feet
+    const good = f.ents.find(e => !e.dead && e.kind === KIND.ITEM && e.price &&
+      rectsOverlap(p.x + 2, p.y + 2, 12, 12, e.x + 2, e.y + 2, 12, 12));
+    if (good) return this.buy(p, f, good);
+
     if (t === TT.PEDESTAL) {
       const item = f.depth >= MAX_DEPTH ? { type: ITEM.RELIC } : rollPrize(f.depth, f.rng);
       f.set(i, TT.FLOOR_DECO);
@@ -990,6 +1163,8 @@ export class Game {
     if (f.level.keySpot !== null && f.level.keySpot !== undefined) {
       this.dropItem(f, f.level.keySpot, { type: ITEM.KEY });
     }
+    this.stockShop(f);
+    this.furnish(f);
   }
 
   spawnRandomMob(f) {
@@ -1025,10 +1200,12 @@ export class Game {
   dropItem(f, tile, item) {
     if (!item) return;
     const px = tileToPixel(tile, { x: 2, y: 2, w: 12, h: 12 });
-    f.ents.push({
+    const e = {
       id: this.entSeq++, kind: KIND.ITEM, x: px.x, y: px.y, dir: 0,
       box: { x: 2, y: 2, w: 12, h: 12 }, t: 0, item,
-    });
+    };
+    f.ents.push(e);
+    return e;
   }
 
   stepFloor(f) {
@@ -1093,7 +1270,7 @@ export class Game {
 
     if (!f.level.boss && --f.spawnTimer <= 0) {
       f.spawnTimer = 220;
-      const alive = f.ents.filter(e => !e.dead && isMob(e.kind)).length;
+      const alive = f.ents.filter(e => !e.dead && isMob(e.kind) && !isNpc(e.kind)).length;
       if (alive < mobBudget(f.depth)) this.spawnRandomMob(f);
     }
 
@@ -1396,6 +1573,15 @@ export class Game {
   hurtMob(e, dmg, fromDir, f, byPlayer, overTime = false) {
     if (e.flash > 3 && !overTime) return;
     const st = MOBS[e.kind];
+    if (st.npc) {
+      // rob a shopkeeper and he leaves, taking the shelves with him
+      e.dead = true;
+      f.shopkeeper = null;
+      for (const o of f.ents) if (o.price) o.dead = true;
+      this.fx(f, 'poof', e.x + 8, e.y + 8);
+      this.banner('THE SHOPKEEPER VANISHES, AND SO DOES HIS STOCK', 2400);
+      return;
+    }
     const scaled = dmg * (e.effects?.taken ?? 1);
     const taken = Math.max(1, Math.round(scaled - (overTime ? 0 : (st.armour || 0))));
     e.hp -= taken;
@@ -1416,6 +1602,7 @@ export class Game {
 
   /** Put a timed effect on an actor and let the floor know about it. */
   afflict(actor, id, ticks, mag = 1, f = null) {
+    if (isNpc(actor.kind)) return;   // gas should not rob you of a shop
     BF.apply(actor, id, ticks, mag);
     if (f) {
       const def = BF.BUFFS[id];
@@ -1558,7 +1745,8 @@ export class Game {
       if (e.kind === KIND.ITEM) {
         const it = e.item;
         items.push([e.id, Math.round(e.x), Math.round(e.y), it.type,
-                    it.kind || '', it.tier || 0, it.upgrade || 0, it.amount || 0]);
+                    it.kind || '', it.tier || 0, it.upgrade || 0, it.amount || 0,
+                    e.price || 0]);
       } else {
         let flags = 0;
         if (e.flash > 0) flags |= 1;

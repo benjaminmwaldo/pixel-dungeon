@@ -5,6 +5,7 @@ import { Input } from './input.js';
 import { Net } from './net.js';
 import * as audio from './audio.js';
 import { TICK_MS, CLASS_ORDER, isBoss } from '../shared/constants.js';
+import { itemLabel } from '../shared/items.js';
 import { TT, regionOf } from '../shared/terrain.js';
 import { drawInventory, drawPerks, moveNode, firstNode } from './screens.js';
 import { treesFor } from '../shared/perks.js';
@@ -345,7 +346,7 @@ function draw(now) {
       if (panel === 'inv') drawInventory(renderer, st, invUi);
       else if (panel === 'perks') drawPerks(renderer, st, perkUi);
       else if (banner) renderer.banner(banner);
-      else promptForTile();
+      else promptForTile(st);
       updateMusic(st);
       break;
     }
@@ -353,7 +354,17 @@ function draw(now) {
   renderer.present();
 }
 
-function promptForTile() {
+function promptForTile(st) {
+  // standing on something with a price tag
+  const good = st.items?.find(e => e.price &&
+    Math.abs(e.x - st.me.x) < 10 && Math.abs(e.y - st.me.y) < 10);
+  if (good) {
+    const name = itemLabel(good, st.app, st.known || { potions: [], scrolls: [] });
+    renderer.prompt(st.me.gold >= good.price
+      ? `E - BUY ${name} (${good.price})`
+      : `${name} - ${good.price} GOLD`);
+    return;
+  }
   const t = net.tileHere();
   if (t === TT.EXIT) renderer.prompt('E - DESCEND');
   else if (t === TT.ENTRANCE && net.depth > 1) renderer.prompt('E - CLIMB BACK UP');

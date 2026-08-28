@@ -33,6 +33,9 @@ export const KIND = {
   MONK: 15, WARLOCK: 16, ELEMENTAL: 17,
   DEMON: 18, EYE: 19, SCORPIO: 20,
   SHEEP: 21,
+
+  // townsfolk, who happen to live very far underground
+  SHOPKEEPER: 22,
   BOSS_GLUT: 30, BOSS_WARDEN: 31, BOSS_TYRANT: 32, BOSS_KING: 33, BOSS_UNSLEEPING: 34,
 
   // projectiles 40..59
@@ -45,6 +48,9 @@ export const KIND = {
 export const MOB_MIN = 1, MOB_MAX = 39;
 export const isMob = (k) => k >= MOB_MIN && k <= MOB_MAX;
 export const isBoss = (k) => k >= 30 && k <= 39;
+// Somebody who talks rather than bites.
+export const NPC_MIN = 22, NPC_MAX = 29;
+export const isNpc = (k) => k >= NPC_MIN && k <= NPC_MAX;
 
 // ---------------------------------------------------------------------------
 // Hero classes — one per player slot, so a full party covers every role.

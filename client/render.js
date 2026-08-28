@@ -279,6 +279,16 @@ export class Renderer {
     if (!img) return;
     blit(this.ctx, img, e.x, e.y);
     if ((this.frame & 31) < 3) blit(this.ctx, IMG.ITEM_SPARKLE, e.x, e.y);
+    if (e.price) {
+      // adjacent shelves would overlap, so lift every other column a little
+      const tag = `${e.price}`;
+      const w = textWidth(tag, 7);
+      const tagX = Math.round(e.x + 8 - w / 2);
+      const tagY = e.y - ((Math.round(e.x / 16) & 1) ? 13 : 7);
+      this.ctx.fillStyle = 'rgba(0,0,0,0.75)';
+      this.ctx.fillRect(tagX - 1, tagY - 1, w + 2, 9);
+      text(this.ctx, tag, tagX, tagY, '#F8B800', 7);
+    }
   }
 
   itemImage(e, st) {

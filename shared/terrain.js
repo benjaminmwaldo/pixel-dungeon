@@ -32,13 +32,14 @@ export const TT = {
   WALL_DECO: 22,     // torch bracket / vent, still a wall
   SIGN: 23,
   RUBBLE: 24,
+  CRACKED: 25,     // gives way the moment you stand on it
 };
 
 // A tile you can walk onto.
 const PASSABLE = new Set([
   TT.FLOOR, TT.FLOOR_DECO, TT.GRASS, TT.HIGH_GRASS, TT.WATER, TT.OPEN_DOOR,
   TT.ENTRANCE, TT.EXIT, TT.EMBERS, TT.TRAP_HIDDEN, TT.TRAP, TT.TRAP_SPENT,
-  TT.PEDESTAL, TT.SIGN, TT.RUBBLE,
+  TT.PEDESTAL, TT.SIGN, TT.RUBBLE, TT.CRACKED,
 ]);
 
 // A tile that stops you seeing past it.
@@ -54,7 +55,7 @@ const FLYABLE = new Set([TT.CHASM, TT.WATER]);
 const SHOT_PASS = new Set([
   TT.FLOOR, TT.FLOOR_DECO, TT.GRASS, TT.HIGH_GRASS, TT.WATER, TT.CHASM,
   TT.OPEN_DOOR, TT.ENTRANCE, TT.EXIT, TT.EMBERS, TT.TRAP_HIDDEN, TT.TRAP,
-  TT.TRAP_SPENT, TT.PEDESTAL, TT.SIGN, TT.RUBBLE, TT.WELL,
+  TT.TRAP_SPENT, TT.PEDESTAL, TT.SIGN, TT.RUBBLE, TT.WELL, TT.CRACKED,
 ]);
 
 const FLAMMABLE = new Set([TT.GRASS, TT.HIGH_GRASS, TT.DOOR, TT.OPEN_DOOR, TT.BARRICADE, TT.BOOKSHELF]);
@@ -70,7 +71,8 @@ export function isTrap(t) { return t === TT.TRAP_HIDDEN || t === TT.TRAP; }
 /** Tiles a mob or item may be dropped on. */
 export function spawnable(t) {
   return t === TT.FLOOR || t === TT.FLOOR_DECO || t === TT.GRASS ||
-         t === TT.HIGH_GRASS || t === TT.EMBERS || t === TT.RUBBLE;
+         t === TT.HIGH_GRASS || t === TT.EMBERS || t === TT.RUBBLE ||
+         t === TT.CRACKED;
 }
 
 export const idx = (x, y) => y * LEVEL_W + x;
