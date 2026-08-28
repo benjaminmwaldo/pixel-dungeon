@@ -38,6 +38,9 @@ export const KIND = {
   SHOPKEEPER: 22,
 
   MIMIC: 26,
+
+  // things a boss brings with it
+  PYLON: 27, FIST: 28,
   BOSS_GLUT: 30, BOSS_WARDEN: 31, BOSS_TYRANT: 32, BOSS_KING: 33, BOSS_UNSLEEPING: 34,
 
   // projectiles 40..59

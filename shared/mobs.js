@@ -60,26 +60,65 @@ export const MOBS = {
     ai: 'chase', box: BIG, armour: 2,
   },
 
+  // A pylon: it does nothing but stand there and keep its master safe.
+  [KIND.PYLON]: {
+    name: 'PYLON', sprite: 'PYLON', hp: 40, dmg: 0, speed: 0, xp: 8,
+    ai: 'idle', box: BIG, harmless: true, armour: 2,
+  },
+
+  // A fist: what the thing at the bottom reaches out with.
+  [KIND.FIST]: {
+    name: 'FIST', sprite: 'FIST', hp: 70, dmg: 14, speed: 1.6, xp: 30,
+    ai: 'chase', box: BIG, armour: 3,
+  },
+
   // ---- the five chapter bosses -----------------------------------------
   [KIND.BOSS_GLUT]: {
     name: 'GLUT, THE SWOLLEN', sprite: 'BOSS_GLUT', hp: 90, dmg: 8, speed: 1.1, xp: 60,
     ai: 'boss', box: HUGE, w: 32, h: 32, shot: KIND.ACID, splitsOnDeath: KIND.SLIME,
+    fight: 'glut',
+    phases: [
+      { at: 1.00, say: 'SOMETHING IN THE WATER IS AWAKE' },
+      { at: 0.50, say: 'IT SWELLS, AND THE WATER COMES WITH IT' },
+    ],
   },
   [KIND.BOSS_WARDEN]: {
     name: 'THE WARDEN', sprite: 'BOSS_WARDEN', hp: 150, dmg: 12, speed: 1.8, xp: 120,
     ai: 'boss', box: HUGE, w: 32, h: 32, shot: KIND.DART, summons: KIND.SKELETON,
+    fight: 'warden',
+    phases: [
+      { at: 1.00, say: 'THE WARDEN HAS BEEN EXPECTING YOU' },
+      { at: 0.55, say: 'HE STOPS WALKING, AND STARTS APPEARING' },
+    ],
   },
   [KIND.BOSS_TYRANT]: {
     name: 'THE ORE TYRANT', sprite: 'BOSS_TYRANT', hp: 230, dmg: 16, speed: 1.4, xp: 200,
     ai: 'boss', box: HUGE, w: 32, h: 32, shot: KIND.FIREBALL, charges: true,
+    fight: 'tyrant',
+    phases: [
+      { at: 1.00, say: 'THE ORE TYRANT GRINDS INTO MOTION' },
+      { at: 0.60, say: 'IT RAISES ITS PYLONS - BRING THEM DOWN' },
+    ],
   },
   [KIND.BOSS_KING]: {
     name: 'THE BURIED KING', sprite: 'BOSS_KING', hp: 320, dmg: 20, speed: 1.5, xp: 300,
     ai: 'boss', box: HUGE, w: 32, h: 32, shot: KIND.BOLT, summons: KIND.GOLEM,
+    fight: 'king',
+    phases: [
+      { at: 1.00, say: 'THE BURIED KING TAKES THE FLOOR' },
+      { at: 0.66, say: 'HE CALLS HIS COURT UP OUT OF THE STONE' },
+      { at: 0.30, say: 'HE FALLS - AND GETS BACK UP WITHOUT HIS SKIN' },
+    ],
   },
   [KIND.BOSS_UNSLEEPING]: {
     name: 'THE UNSLEEPING', sprite: 'BOSS_UNSLEEPING', hp: 450, dmg: 24, speed: 0.9, xp: 500,
     ai: 'boss', box: HUGE, w: 32, h: 32, shot: KIND.BEAM, summons: KIND.DEMON, fan: true,
+    fight: 'unsleeping',
+    phases: [
+      { at: 1.00, say: 'IT DOES NOT MOVE. IT REACHES' },
+      { at: 0.99, say: 'NOTHING TOUCHES IT WHILE A FIST STILL STANDS' },
+      { at: 0.40, say: 'THE LAST OF IT COMES AWAKE' },
+    ],
   },
 };
 
