@@ -22,8 +22,9 @@ import { MOBS, SPAWNS, BOSS_OF, mobBudget, scaleFor, HEARING } from './mobs.js';
 import {
   ITEM, POTION, SCROLL, POTION_KINDS, SCROLL_KINDS, makeAppearances,
   rollLoot, rollPrize, rollDrop, WEAPONS, ARMORS, isConsumable, stackKey,
-  itemLabel, buyPrice, sellPrice, rollStock,
+  itemLabel, buyPrice, sellPrice, rollStock, isWorn,
 } from './items.js';
+import { RINGS, applyRings, RING_LEARN_TICKS } from './rings.js';
 import { computeStats, canTake, clientMods, PERKS } from './perks.js';
 import { toBase64 } from './b64.js';
 import * as BF from './buffs.js';
@@ -75,7 +76,7 @@ export class Game {
     this.state = 'lobby';
     this.seed = (Math.random() * 0x7fffffff) | 0;
     this.app = makeAppearances(this.seed);
-    this.known = { potions: [], scrolls: [] };
+    this.known = { potions: [], scrolls: [], rings: [] };
     this.metaDirty = true;
     this.banners = [];
     this.overTimer = 0;
@@ -106,7 +107,8 @@ export class Game {
       cls, colour: def.colour,
       depth: 1, hp: def.hp, maxHp: def.hp, level: 1, xp: 0,
       bag: new Array(BAG_BASE).fill(null),
-      equip: { weapon: { type: ITEM.WEAPON, tier: 1, upgrade: 0 },
+      equip: { ring1: null, ring2: null,
+               weapon: { type: ITEM.WEAPON, tier: 1, upgrade: 0 },
                armor: { type: ITEM.ARMOR, tier: 1, upgrade: 0 } },
       perks: {}, perkPoints: 0, stats: computeStats({}),
       gold: 0, hunger: HUNGER_MAX, hungerTick: 0, regenTick: 0,
@@ -129,7 +131,7 @@ export class Game {
 
   /** Recompute everything the perks touch, and resize the bag to match. */
   recalc(p) {
-    p.stats = computeStats(p.perks);
+    p.stats = applyRings(computeStats(p.perks), p.equip);
     const base = CLASSES[p.cls].hp + (p.level - 1) * HP_PER_LEVEL;
     p.maxHp = base + p.stats.maxHp;
     if (p.hp > p.maxHp) p.hp = p.maxHp;
@@ -209,7 +211,11 @@ export class Game {
 
     // timed effects: damage, mending, and everything they change about you
     const up = BF.tickBuffs(p);
-    if (up.damage) this.hurtPlayer(p, Math.ceil(up.damage), p.x + 8, p.y + 40, null, true);
+    if (up.damage) {
+      // a ring of elements blunts anything that eats away at you
+      const soak = 1 - Math.min(0.75, p.stats.elements || 0);
+      this.hurtPlayer(p, Math.ceil(up.damage * soak), p.x + 8, p.y + 40, null, true);
+    }
     if (up.heal) this.healPlayer(p, Math.ceil(up.heal));
     if (up.recharge && p.abilityCd > 0) p.abilityCd = Math.max(0, p.abilityCd - up.recharge);
     const eff = BF.summarise(p);
@@ -234,6 +240,19 @@ export class Game {
     p.moveMult = eff.move * wear;
     p.liveMods = { ...p.mods, speedMult: p.mods.speedMult * p.moveMult };
     p.sinceHit = (p.sinceHit || 0) + 1;
+
+    // a ring gives itself away once you have worn it a while
+    for (const which of ['ring1', 'ring2']) {
+      const r = p.equip[which];
+      if (!r || r.known) continue;
+      r.worn = (r.worn || 0) + 1;
+      if (r.worn >= RING_LEARN_TICKS) {
+        r.known = true;
+        if (!this.known.rings.includes(r.kind)) this.known.rings.push(r.kind);
+        this.banner(`IT IS A RING OF ${RINGS[r.kind].name}`, 2000);
+        this.metaDirty = true;
+      }
+    }
 
     if (under === TT.WATER && !gl?.fireproof) { BF.clear(p, B.BURNING); }
     if (under === TT.EMBERS && !gl?.fireproof && Math.random() < 0.02) BF.apply(p, B.BURNING, 90);
@@ -313,6 +332,11 @@ export class Game {
     const armour = ARMORS[gear.tier - 1].def + gear.upgrade * 1.5 + st.armour;
     p.sinceHit = 0;
     let taken = Math.max(1, Math.round(dmg - armour * 0.5));
+    // a ring of tenacity pays off exactly when you need it to
+    if (st.tenacity) {
+      const missing = 1 - p.hp / Math.max(1, p.maxHp);
+      taken = Math.max(1, Math.round(taken * (1 - Math.min(0.6, st.tenacity * missing))));
+    }
     taken = this.procGlyph(p, taken, from, f);
     if (p.guarding) {
       taken = Math.max(0, Math.round(taken * st.guard));
@@ -778,11 +802,55 @@ export class Game {
     return true;
   }
 
+  /** Put a ring on, taking off whichever one is in the way. */
+  wearRing(p, n) {
+    const slot = p.bag[n];
+    if (!slot) return;
+    const ring = slot.item;
+    // an empty finger first, otherwise the one that is not stuck
+    let which = !p.equip.ring1 ? 'ring1' : !p.equip.ring2 ? 'ring2' : null;
+    if (!which) {
+      if (!p.equip.ring1.cursed) which = 'ring1';
+      else if (!p.equip.ring2.cursed) which = 'ring2';
+      else {
+        this.banner('BOTH RINGS ARE STUCK FAST', 1800);
+        return;
+      }
+    }
+    const off = p.equip[which];
+    p.equip[which] = { ...ring, worn: 0 };
+    p.bag[n] = off ? { key: stackKey(off), item: off, count: 1 } : null;
+    this.fx(this.floor(p.depth), 'equip', p.x + 8, p.y + 8);
+    this.banner(`${p.name} PUTS ON THE ${itemLabel(ring, this.app, this.known)}`, 1600);
+    if (p.equip[which].cursed) {
+      p.equip[which].known = true;
+      this.banner('IT TIGHTENS, AND WILL NOT COME OFF', 2000);
+    }
+    this.recalc(p);
+  }
+
+  /** Take a ring off, if it will let you. */
+  removeRing(p, which) {
+    const ring = p.equip[which];
+    if (!ring) return;
+    if (ring.cursed) {
+      ring.known = true;
+      this.banner('IT WILL NOT COME OFF', 1600);
+      this.recalc(p);
+      return;
+    }
+    if (!this.addToBag(p, ring)) { this.banner(`${p.name}'S PACK IS FULL`, 1200); return; }
+    p.equip[which] = null;
+    this.banner('RING REMOVED', 1200);
+    this.recalc(p);
+  }
+
   /** Wear something from the bag, putting whatever you had back. */
   equipFrom(p, n) {
     const slot = p.bag[n];
     if (!slot) return;
     const it = slot.item;
+    if (it.type === ITEM.RING) return this.wearRing(p, n);
     if (it.type !== ITEM.WEAPON && it.type !== ITEM.ARMOR) return;
     const which = it.type === ITEM.WEAPON ? 'weapon' : 'armor';
     const old = p.equip[which];
@@ -1074,9 +1142,15 @@ export class Game {
       case 'drop': this.dropSlot(p, a); break;
       case 'swap': this.swapSlots(p, a, b); break;
       case 'unequip': {
-        const which = a === 0 ? 'weapon' : 'armor';
+        const which = ['weapon', 'armor', 'ring1', 'ring2'][a] || 'weapon';
+        if (which === 'ring1' || which === 'ring2') { this.removeRing(p, which); break; }
         const worn = p.equip[which];
         if (!worn || worn.tier <= 1) return;      // your last shirt stays on
+        if (worn.cursed) {
+          this.learnGear(p, worn, which);
+          this.banner(`THE ${which === 'weapon' ? 'WEAPON' : 'ARMOUR'} WILL NOT COME OFF`, 1600);
+          return;
+        }
         if (!this.addToBag(p, worn)) return;
         p.equip[which] = { type: worn.type, tier: 1, upgrade: 0 };
         this.recalc(p);
@@ -1093,7 +1167,7 @@ export class Game {
     if (!slot) return;
     const it = slot.item;
 
-    if (it.type === ITEM.WEAPON || it.type === ITEM.ARMOR) { this.equipFrom(p, n); return; }
+    if (isWorn(it)) { this.equipFrom(p, n); return; }
     if (it.type === ITEM.KEY || it.type === ITEM.GOLDKEY) return;  // spent on doors
 
     if (it.type === ITEM.FOOD) {
@@ -1172,17 +1246,52 @@ export class Game {
     this.fx(f, 'read', p.x + 8, p.y + 8);
     switch (kind) {
       case SCROLL.UPGRADE: {
+        // whichever of the four is furthest behind, rings first if one is new
         const w = p.equip.weapon, a = p.equip.armor;
-        if (w.tier * 3 + w.upgrade <= a.tier * 3 + a.upgrade) w.upgrade++;
-        else a.upgrade++;
+        const bare = ['ring1', 'ring2'].find(k => p.equip[k] && !(p.equip[k].upgrade || 0));
+        let lifted = null;
+        if (bare) {
+          const r = p.equip[bare];
+          r.upgrade = (r.upgrade || 0) + 1;
+          if (r.cursed && Math.random() < 0.5) { r.cursed = false; lifted = 'RING'; }
+        } else if (w.tier * 3 + w.upgrade <= a.tier * 3 + a.upgrade) {
+          w.upgrade++;
+          if (w.cursed && Math.random() < 0.5) { w.cursed = false; w.curse = null; lifted = 'WEAPON'; }
+        } else {
+          a.upgrade++;
+          if (a.cursed && Math.random() < 0.5) { a.cursed = false; a.curse = null; lifted = 'ARMOUR'; }
+        }
         this.recalc(p);
-        this.banner(`${p.name}'S GEAR GLOWS`, 1600);
+        this.banner(lifted ? `THE ${lifted} GLOWS, AND LETS GO` : `${p.name}'S GEAR GLOWS`, 1600);
         break;
       }
       case SCROLL.IDENTIFY: {
+        // gear on your body first: knowing what is already stuck to you matters
+        // more than knowing what is still in the bag
+        for (const which of ['weapon', 'armor', 'ring1', 'ring2']) {
+          const g = p.equip[which];
+          if (!g || g.known) continue;
+          g.known = true;
+          if (g.kind && !this.known.rings.includes(g.kind)) this.known.rings.push(g.kind);
+          this.banner(`IT IS ${itemLabel(g, this.app, this.known)}`, 1800);
+          this.metaDirty = true;
+          return;
+        }
         for (const slot of p.bag) {
           if (!slot) continue;
           const it = slot.item;
+          if (it.type === ITEM.RING && !this.known.rings.includes(it.kind)) {
+            this.known.rings.push(it.kind);
+            it.known = true;
+            this.banner(`IT IS A RING OF ${RINGS[it.kind].name}`, 1800);
+            return;
+          }
+          if ((it.type === ITEM.WEAPON || it.type === ITEM.ARMOR) && !it.known &&
+              (it.ench || it.glyph || it.curse)) {
+            it.known = true;
+            this.banner(`IT IS ${itemLabel(it, this.app, this.known)}`, 1800);
+            return;
+          }
           if (it.type === ITEM.POTION && !this.known.potions.includes(it.kind)) {
             this.known.potions.push(it.kind);
             this.banner(`IT IS A POTION OF ${it.kind.toUpperCase()}`, 1800);
@@ -1303,9 +1412,9 @@ export class Game {
   /** Lifts a curse from what you are wearing. */
   uncurse(p) {
     let lifted = 0;
-    for (const which of ['weapon', 'armor']) {
+    for (const which of ['weapon', 'armor', 'ring1', 'ring2']) {
       const g = p.equip[which];
-      if (!g.cursed && !g.curse) continue;
+      if (!g || (!g.cursed && !g.curse)) continue;
       g.cursed = false;
       g.curse = null;
       g.known = true;
@@ -2011,7 +2120,7 @@ export class Game {
     this.announceStart = true;
     this.seed = (Math.random() * 0x7fffffff) | 0;
     this.app = makeAppearances(this.seed);
-    this.known = { potions: [], scrolls: [] };
+    this.known = { potions: [], scrolls: [], rings: [] };
     this.floors.clear();
     this.kills = 0; this.deaths = 0; this.deepest = 1;
     for (const p of this.players.values()) {
@@ -2019,7 +2128,8 @@ export class Game {
       const keep = { id: p.id, name: p.name, cls: p.cls, colour: p.colour, ready: p.ready };
       Object.assign(p, newPlayerState(), keep, {
         depth: 1, hp: def.hp, maxHp: def.hp, level: 1, xp: 0, gold: 0,
-        equip: { weapon: { type: ITEM.WEAPON, tier: 1, upgrade: 0 },
+        equip: { ring1: null, ring2: null,
+                 weapon: { type: ITEM.WEAPON, tier: 1, upgrade: 0 },
                  armor: { type: ITEM.ARMOR, tier: 1, upgrade: 0 } },
         bag: new Array(BAG_BASE).fill(null),
         perks: {}, perkPoints: 0,

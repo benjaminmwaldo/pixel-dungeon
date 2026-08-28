@@ -11,12 +11,13 @@ import {
 } from '../shared/constants.js';
 import { LEVEL_W, LEVEL_H, TT, idx, tx, ty, regionOf } from '../shared/terrain.js';
 import { ITEM, POTION_TINT } from '../shared/items.js';
+import { RING_TINT } from '../shared/rings.js';
 import { MOBS } from '../shared/mobs.js';
 import { BUFFS } from '../shared/buffs.js';
 import { TRAPS, trapById } from '../shared/traps.js';
 import {
   IMG, TILE_IMG, TILE_DIM, WATER_IMG, WATER_DIM, HERO_IMG, bakeAll,
-  blit, text, textCentered, textWidth, silhouette, potionImg,
+  blit, text, textCentered, textWidth, silhouette, potionImg, ringImg,
 } from './art/bake.js';
 
 const C = {
@@ -306,6 +307,10 @@ export class Renderer {
       case ITEM.POTION: {
         const look = st.app?.potionLook?.[e.kind];
         return potionImg(POTION_TINT[look] || '#FCFCFC');
+      }
+      case ITEM.RING: {
+        const look = st.app?.ringLook?.[e.kind];
+        return ringImg(RING_TINT[look] || '#FCFCFC');
       }
       default: return null;
     }

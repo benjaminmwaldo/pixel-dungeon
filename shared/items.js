@@ -4,11 +4,12 @@
 
 import { rngFor } from './terrain.js';
 import { dressGear, markName } from './enchants.js';
+import { RINGS, RING_IDS, RING_LOOKS, rollRing } from './rings.js';
 
 export const ITEM = {
   GOLD: 'gold', FOOD: 'food', POTION: 'potion', SCROLL: 'scroll',
   WEAPON: 'weapon', ARMOR: 'armor', KEY: 'key', GOLDKEY: 'goldkey',
-  BOMB: 'bomb', RELIC: 'relic',
+  BOMB: 'bomb', RELIC: 'relic', RING: 'ring',
 };
 
 // The twelve the original carries.
@@ -61,10 +62,12 @@ export function makeAppearances(seed) {
   const rng = rngFor((seed ^ 0x5bf03635) >>> 0);
   const pots = rng.shuffle(POTION_LOOKS.slice());
   const scrs = rng.shuffle(SCROLL_LOOKS.slice());
-  const potionLook = {}, scrollLook = {};
+  const rngs = rng.shuffle(RING_LOOKS.slice());
+  const potionLook = {}, scrollLook = {}, ringLook = {};
   POTION_KINDS.forEach((k, i) => { potionLook[k] = pots[i % pots.length]; });
   SCROLL_KINDS.forEach((k, i) => { scrollLook[k] = scrs[i % scrs.length]; });
-  return { potionLook, scrollLook };
+  RING_IDS.forEach((k, i) => { ringLook[k] = rngs[i % rngs.length]; });
+  return { potionLook, scrollLook, ringLook };
 }
 
 /** What the party should see this item called, given what they have learned. */
@@ -92,6 +95,14 @@ export function itemLabel(item, app, known) {
       return known.scrolls.includes(item.kind)
         ? `SCROLL OF ${item.kind.toUpperCase()}`
         : `SCROLL "${app.scrollLook[item.kind]}"`;
+    case ITEM.RING: {
+      const plus = item.upgrade ? `+${item.upgrade} ` : '';
+      if (!item.known && !known.rings?.includes(item.kind)) {
+        return `${app.ringLook?.[item.kind] || 'PLAIN'} RING`;
+      }
+      const word = item.cursed ? 'CURSED ' : '';
+      return `${plus}${word}RING OF ${RINGS[item.kind].name}`;
+    }
     default: return '?';
   }
 }
@@ -110,9 +121,16 @@ export function isConsumable(item) {
          item.type === ITEM.KEY || item.type === ITEM.GOLDKEY;
 }
 
+/** Something you put on rather than use up. */
+export function isWorn(item) {
+  return item?.type === ITEM.WEAPON || item?.type === ITEM.ARMOR ||
+         item?.type === ITEM.RING;
+}
+
 /** A stack key, so five rations occupy one slot. */
 export function stackKey(item) {
   if (item.type === ITEM.POTION || item.type === ITEM.SCROLL) return `${item.type}:${item.kind}`;
+  if (item.type === ITEM.RING) return `ring:${item.kind}:${item.upgrade || 0}`;
   return item.type;
 }
 
@@ -137,7 +155,8 @@ export function rollLoot(depth, rng, { rich = false } = {}) {
   if (!rich && r < 0.42) return { type: ITEM.FOOD };
   if (r < 0.60) return { type: ITEM.POTION, kind: rng.pick(COMMON_POTIONS) };
   if (r < 0.76) return { type: ITEM.SCROLL, kind: rng.pick(COMMON_SCROLLS) };
-  if (r < 0.84) return { type: ITEM.BOMB, amount: rng.range(1, 3) };
+  if (r < 0.81) return { type: ITEM.BOMB, amount: rng.range(1, 3) };
+  if (r < 0.84) return rollRing(depth, rng);
   const tier = clampTier(Math.ceil(depth / 5) + (rng.chance(0.25) ? 1 : 0));
   if (r < 0.92) {
     return dressGear({ type: ITEM.WEAPON, tier, upgrade: rng.chance(0.25) ? 1 : 0 }, depth, rng);
@@ -151,8 +170,9 @@ export function rollPrize(depth, rng) {
   const tier = clampTier(Math.ceil(depth / 5) + 1);
   if (r < 0.28) return blessed({ type: ITEM.WEAPON, tier, upgrade: rng.range(1, 2) }, depth, rng);
   if (r < 0.56) return blessed({ type: ITEM.ARMOR, tier, upgrade: rng.range(1, 2) }, depth, rng);
-  if (r < 0.74) return { type: ITEM.SCROLL, kind: SCROLL.UPGRADE };
-  if (r < 0.88) return { type: ITEM.POTION, kind: POTION.STRENGTH };
+  if (r < 0.68) return { type: ITEM.SCROLL, kind: SCROLL.UPGRADE };
+  if (r < 0.80) return { ...rollRing(depth, rng), cursed: false };
+  if (r < 0.90) return { type: ITEM.POTION, kind: POTION.STRENGTH };
   return { type: ITEM.GOLD, amount: rng.range(60, 60 + depth * 12) };
 }
 
@@ -188,6 +208,7 @@ export function itemValue(item) {
     case ITEM.KEY: case ITEM.GOLDKEY: return 0;
     case ITEM.POTION: return item.kind === POTION.STRENGTH ? 300 : 45;
     case ITEM.SCROLL: return item.kind === SCROLL.UPGRADE ? 300 : 45;
+    case ITEM.RING: return 200 + (item.upgrade || 0) * 60;
     case ITEM.WEAPON:
     case ITEM.ARMOR: {
       const t = item.tier || 1;

@@ -5,8 +5,9 @@
 import { SCREEN_W, SCREEN_H, CLASSES, CLASS_ORDER } from '../shared/constants.js';
 import { ITEM, POTION_TINT, WEAPONS, ARMORS, itemLabel, isConsumable } from '../shared/items.js';
 import { ENCHANTS, GLYPHS, CURSES } from '../shared/enchants.js';
+import { RINGS, RING_TINT } from '../shared/rings.js';
 import { TREES, PERKS, perksInTree, treesFor, canTake } from '../shared/perks.js';
-import { IMG, blit, text, textCentered, textWidth, potionImg } from './art/bake.js';
+import { IMG, blit, text, textCentered, textWidth, potionImg, ringImg } from './art/bake.js';
 
 const C = {
   panel: '#0B0E18', frame: '#39405C', dim: '#1A2032',
@@ -39,6 +40,8 @@ export function iconFor(item, st) {
     case ITEM.SCROLL: return IMG.SCROLL;
     case ITEM.POTION:
       return potionImg(POTION_TINT[st.app?.potionLook?.[item.kind]] || '#FCFCFC');
+    case ITEM.RING:
+      return ringImg(RING_TINT[st.app?.ringLook?.[item.kind]] || '#FCFCFC');
     default: return null;
   }
 }
@@ -103,6 +106,12 @@ function describe(item, st, short = false) {
     case ITEM.SCROLL:
       return st.known?.scrolls?.includes(item.kind)
         ? scrollText(item.kind) : 'THE RUNE MEANS NOTHING TO YOU YET';
+    case ITEM.RING: {
+      const shown = item.known || st.known?.rings?.includes(item.kind);
+      if (!shown) return 'YOU HAVE NOT WORN IT LONG ENOUGH';
+      const word = RINGS[item.kind]?.blurb || '';
+      return item.cursed ? `${word}  -  BACKWARDS, AND STUCK` : word;
+    }
     default: return '';
   }
 }
@@ -162,28 +171,38 @@ export function drawInventory(R, st, ui) {
   const ex = 174, ey = 26;
   text(g, 'WORN', ex, ey - 8, 'grey', 6);
   const worn = [
-    ['weapon', st.equip?.weapon, WEAPONS, IMG.SWORD_ICON],
-    ['armor', st.equip?.armor, ARMORS, IMG.ARMOR_ICON],
+    ['weapon', st.equip?.weapon, ITEM.WEAPON, IMG.SWORD_ICON],
+    ['armor', st.equip?.armor, ITEM.ARMOR, IMG.ARMOR_ICON],
+    ['ring1', st.equip?.ring1, ITEM.RING, null],
+    ['ring2', st.equip?.ring2, ITEM.RING, null],
   ];
-  worn.forEach(([which, item, table, icon], i) => {
-    const y = ey + i * 22;
+  const ROW = 19;   // four slots and a hero summary have to share the column
+  worn.forEach(([which, item, kind, icon], i) => {
+    const y = ey + i * ROW;
     const sel = ui.cursor === -1 - i;
-    box(g, ex, y, 136, 20, sel ? '#243055' : C.dim, sel ? C.gold : C.frame);
-    blit(g, icon, ex + 2, y + 2);
-    if (item) {
-      const full = { ...item, type: which === 'weapon' ? ITEM.WEAPON : ITEM.ARMOR };
+    box(g, ex, y, 136, 18, sel ? '#243055' : C.dim, sel ? C.gold : C.frame);
+    const slotIcon = icon || (item
+      ? ringImg(RING_TINT[st.app?.ringLook?.[item.kind]] || '#FCFCFC')
+      : null);
+    if (slotIcon) blit(g, slotIcon, ex + 2, y + 2);
+    if (!item) {
+      text(g, kind === ITEM.RING ? 'NO RING' : '', ex + 20, y + 5, 'dark', 6);
+      return;
+    }
+    {
+      const full = { ...item, type: kind };
       const name = itemLabel(full, st.app, st.known || { potions: [], scrolls: [] });
       const tint = item.known && item.curse ? 'red' : (sel ? 'white' : 'grey');
-      text(g, fit(name, 136 - 22, 6), ex + 20, y + 3, tint, 6);
-      text(g, fit(describe(full, st, true), 136 - 22, 5), ex + 20, y + 11, 'dark', 5);
+      text(g, fit(name, 136 - 22, 6), ex + 20, y + 2, tint, 6);
+      text(g, fit(describe(full, st, true), 136 - 22, 5), ex + 20, y + 10, 'dark', 5);
     }
   });
 
   // --- a quick read on the hero ------------------------------------------
-  const sy = ey + 50;
+  const sy = ey + worn.length * ROW + 4;
   text(g, `${CLASSES[st.me.cls]?.name || ''}  LEVEL ${st.me.level}`, ex, sy, 'blue', 6);
-  text(g, `HEALTH   ${st.me.hp}/${st.me.maxHp}`, ex, sy + 10, 'white', 6);
-  text(g, `PERK POINTS  ${st.perkPoints || 0}`, ex, sy + 20,
+  text(g, `HEALTH   ${st.me.hp}/${st.me.maxHp}`, ex, sy + 9, 'white', 6);
+  text(g, `PERK POINTS  ${st.perkPoints || 0}`, ex, sy + 18,
     (st.perkPoints || 0) > 0 ? 'gold' : 'grey', 6);
 
   // --- the selected thing -------------------------------------------------
@@ -210,9 +229,19 @@ function actionHint(item, ui) {
   return 'ENTER TO USE IT';
 }
 
+// The four worn slots sit at cursor -1 through -4, in the order they are drawn.
+export const WORN_SLOTS = [
+  ['weapon', ITEM.WEAPON], ['armor', ITEM.ARMOR],
+  ['ring1', ITEM.RING], ['ring2', ITEM.RING],
+];
+
 export function selectedItem(st, ui) {
-  if (ui.cursor === -1) return st.equip?.weapon ? { ...st.equip.weapon, type: ITEM.WEAPON } : null;
-  if (ui.cursor === -2) return st.equip?.armor ? { ...st.equip.armor, type: ITEM.ARMOR } : null;
+  if (ui.cursor < 0) {
+    const entry = WORN_SLOTS[-1 - ui.cursor];
+    if (!entry) return null;
+    const item = st.equip?.[entry[0]];
+    return item ? { ...item, type: entry[1] } : null;
+  }
   const slot = (st.bag || [])[ui.cursor];
   return slot ? slot.item : null;
 }

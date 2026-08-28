@@ -10,98 +10,93 @@ def edit(path, *pairs):
     print('  patched', path)
 
 # ---------------------------------------------------------------------------
-# Marked gear turns up in the world
+# Four worn slots now, not two
 # ---------------------------------------------------------------------------
-edit('shared/items.js',
-  ("import { rngFor } from './terrain.js';",
-   "import { rngFor } from './terrain.js';\nimport { dressGear, markName } from './enchants.js';"),
-
-  ("""  const tier = clampTier(Math.ceil(depth / 5) + (rng.chance(0.25) ? 1 : 0));
-  if (r < 0.92) return { type: ITEM.WEAPON, tier, upgrade: rng.chance(0.25) ? 1 : 0 };
-  return { type: ITEM.ARMOR, tier, upgrade: rng.chance(0.25) ? 1 : 0 };""",
-   """  const tier = clampTier(Math.ceil(depth / 5) + (rng.chance(0.25) ? 1 : 0));
-  if (r < 0.92) {
-    return dressGear({ type: ITEM.WEAPON, tier, upgrade: rng.chance(0.25) ? 1 : 0 }, depth, rng);
-  }
-  return dressGear({ type: ITEM.ARMOR, tier, upgrade: rng.chance(0.25) ? 1 : 0 }, depth, rng);"""),
-
-  # a prize is worth walking to: marked, never cursed
-  ("""  if (r < 0.28) return { type: ITEM.WEAPON, tier, upgrade: rng.range(1, 2) };
-  if (r < 0.56) return { type: ITEM.ARMOR, tier, upgrade: rng.range(1, 2) };""",
-   """  if (r < 0.28) return blessed({ type: ITEM.WEAPON, tier, upgrade: rng.range(1, 2) }, depth, rng);
-  if (r < 0.56) return blessed({ type: ITEM.ARMOR, tier, upgrade: rng.range(1, 2) }, depth, rng);"""),
-
-  ("function clampTier(t) { return t < 1 ? 1 : t > 5 ? 5 : t; }",
-   """/** A prize is worth the walk: often marked, never cursed. */
-function blessed(item, depth, rng) {
-  for (let n = 0; n < 6; n++) {
-    const tryIt = dressGear({ ...item }, depth, rng);
-    if (!tryIt.curse) return tryIt;
-  }
-  return item;
-}
-
-function clampTier(t) { return t < 1 ? 1 : t > 5 ? 5 : t; }"""),
-
-  # the name carries the mark once the party knows it
-  ("""    case ITEM.WEAPON: {
-      const w = WEAPONS[item.tier - 1];
-      return item.upgrade ? `+${item.upgrade} ${w.name}` : w.name;
-    }
-    case ITEM.ARMOR: {
-      const a = ARMORS[item.tier - 1];
-      return item.upgrade ? `+${item.upgrade} ${a.name}` : a.name;
-    }""",
-   """    case ITEM.WEAPON: {
-      const w = WEAPONS[item.tier - 1];
-      return gearName(item, w.name);
-    }
-    case ITEM.ARMOR: {
-      const a = ARMORS[item.tier - 1];
-      return gearName(item, a.name);
-    }"""),
-
-  ("/** Is this something you keep in the quick bar rather than wear? */",
-   """/** "+2 BLAZING SABRE", or just "SABRE" while nobody has worked it out. */
-function gearName(item, base) {
-  const plus = item.upgrade ? `+${item.upgrade} ` : '';
-  const mark = item.known ? markName(item) : null;
-  return mark ? `${plus}${mark} ${base}` : `${plus}${base}`;
-}
-
-/** Is this something you keep in the quick bar rather than wear? */"""),
+edit('shared/game.js',
+  ("""      case 'unequip': {
+        const which = a === 0 ? 'weapon' : 'armor';
+        const worn = p.equip[which];
+        if (!worn || worn.tier <= 1) return;      // your last shirt stays on
+        if (!this.addToBag(p, worn)) return;
+        p.equip[which] = { type: worn.type, tier: 1, upgrade: 0 };
+        this.recalc(p);
+        break;
+      }""",
+   """      case 'unequip': {
+        const which = ['weapon', 'armor', 'ring1', 'ring2'][a] || 'weapon';
+        if (which === 'ring1' || which === 'ring2') { this.removeRing(p, which); break; }
+        const worn = p.equip[which];
+        if (!worn || worn.tier <= 1) return;      // your last shirt stays on
+        if (worn.cursed) {
+          this.learnGear(p, worn, which);
+          this.banner(`THE ${which === 'weapon' ? 'WEAPON' : 'ARMOUR'} WILL NOT COME OFF`, 1600);
+          return;
+        }
+        if (!this.addToBag(p, worn)) return;
+        p.equip[which] = { type: worn.type, tier: 1, upgrade: 0 };
+        this.recalc(p);
+        break;
+      }"""),
 )
 
 # ---------------------------------------------------------------------------
-# Armour speaks when it is struck, and cursed gear will not come off
+# The panel shows them, and the cursor reaches them
 # ---------------------------------------------------------------------------
-edit('shared/game.js',
-  ("""  /** Wear something from the bag, putting whatever you had back. */
-  equipFrom(p, n) {
-    const slot = p.bag[n];
-    if (!slot) return;
-    const it = slot.item;
-    if (it.type !== ITEM.WEAPON && it.type !== ITEM.ARMOR) return;
-    const which = it.type === ITEM.WEAPON ? 'weapon' : 'armor';
-    const old = p.equip[which];
-    p.equip[which] = { type: it.type, tier: it.tier, upgrade: it.upgrade || 0 };""",
-   """  /** Wear something from the bag, putting whatever you had back. */
-  equipFrom(p, n) {
-    const slot = p.bag[n];
-    if (!slot) return;
-    const it = slot.item;
-    if (it.type !== ITEM.WEAPON && it.type !== ITEM.ARMOR) return;
-    const which = it.type === ITEM.WEAPON ? 'weapon' : 'armor';
-    const old = p.equip[which];
-    if (old.cursed) {
-      this.banner(`THE ${which === 'weapon' ? 'WEAPON' : 'ARMOUR'} WILL NOT COME OFF`, 1800);
-      if (!old.known) this.learnGear(p, old, which);
+edit('client/screens.js',
+  ("""    case ITEM.POTION:
+      return potionImg(POTION_TINT[st.app?.potionLook?.[item.kind]] || '#FCFCFC');
+    default: return null;""",
+   """    case ITEM.POTION:
+      return potionImg(POTION_TINT[st.app?.potionLook?.[item.kind]] || '#FCFCFC');
+    case ITEM.RING:
+      return ringImg(RING_TINT[st.app?.ringLook?.[item.kind]] || '#FCFCFC');
+    default: return null;"""),
+
+  ("""    case ITEM.SCROLL:
+      return st.known?.scrolls?.includes(item.kind)
+        ? scrollText(item.kind) : 'THE RUNE MEANS NOTHING TO YOU YET';
+    default: return '';""",
+   """    case ITEM.SCROLL:
+      return st.known?.scrolls?.includes(item.kind)
+        ? scrollText(item.kind) : 'THE RUNE MEANS NOTHING TO YOU YET';
+    case ITEM.RING: {
+      const shown = item.known || st.known?.rings?.includes(item.kind);
+      if (!shown) return 'YOU HAVE NOT WORN IT LONG ENOUGH';
+      const word = RINGS[item.kind]?.blurb || '';
+      return item.cursed ? `${word}  -  BACKWARDS, AND STUCK` : word;
+    }
+    default: return '';"""),
+
+  ("""  const worn = [
+    ['weapon', st.equip?.weapon, WEAPONS, IMG.SWORD_ICON],
+    ['armor', st.equip?.armor, ARMORS, IMG.ARMOR_ICON],
+  ];
+  worn.forEach(([which, item, table, icon], i) => {
+    const y = ey + i * 22;""",
+   """  const worn = [
+    ['weapon', st.equip?.weapon, ITEM.WEAPON, IMG.SWORD_ICON],
+    ['armor', st.equip?.armor, ITEM.ARMOR, IMG.ARMOR_ICON],
+    ['ring1', st.equip?.ring1, ITEM.RING, null],
+    ['ring2', st.equip?.ring2, ITEM.RING, null],
+  ];
+  worn.forEach(([which, item, kind, icon], i) => {
+    const y = ey + i * 22;"""),
+
+  ("""    box(g, ex, y, 136, 20, sel ? '#243055' : C.dim, sel ? C.gold : C.frame);
+    blit(g, icon, ex + 2, y + 2);
+    if (item) {
+      const full = { ...item, type: which === 'weapon' ? ITEM.WEAPON : ITEM.ARMOR };""",
+   """    box(g, ex, y, 136, 20, sel ? '#243055' : C.dim, sel ? C.gold : C.frame);
+    const slotIcon = icon || (item
+      ? ringImg(RING_TINT[st.app?.ringLook?.[item.kind]] || '#FCFCFC')
+      : null);
+    if (slotIcon) blit(g, slotIcon, ex + 2, y + 2);
+    if (!item) {
+      text(g, kind === ITEM.RING ? 'NO RING' : '', ex + 20, y + 6, 'dark', 6);
       return;
     }
-    p.equip[which] = { ...it };
-    if (p.equip[which].cursed) {
-      this.learnGear(p, p.equip[which], which);
-    }"""),
+    {
+      const full = { ...item, type: kind };"""),
 )
 
 print('done')

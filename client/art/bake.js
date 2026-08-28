@@ -140,6 +140,7 @@ export function bakeAll() {
   IMG.WARLOCK2 = bake(MOB.WRAITH2, 'warlock2', { c: '#8858FC', 1: '#FCE0A8' });
 
   IMG.POTION_TINTS = {};
+  IMG.RING_TINTS = {};
 
   for (const [key, colour] of Object.entries({
     white: '#FCFCFC', gold: '#F8B800', red: '#F83800', grey: '#8890A0',
@@ -147,6 +148,15 @@ export function bakeAll() {
   })) {
     FONT_IMG[key] = bakeFont(colour);
   }
+}
+
+/** A ring drawn with the stone this run gave it. */
+export function ringImg(tint) {
+  IMG.RING_TINTS ??= {};
+  if (!IMG.RING_TINTS[tint]) {
+    IMG.RING_TINTS[tint] = bake(GEAR.RING, `ring:${tint}`, { W: tint });
+  }
+  return IMG.RING_TINTS[tint];
 }
 
 /** A potion drawn in the colour this run gave that glass. */

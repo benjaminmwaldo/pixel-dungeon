@@ -7,7 +7,8 @@ import * as audio from './audio.js';
 import { TICK_MS, CLASS_ORDER, isBoss } from '../shared/constants.js';
 import { itemLabel } from '../shared/items.js';
 import { TT, regionOf, LEVEL_W, LEVEL_H } from '../shared/terrain.js';
-import { drawInventory, drawPerks, moveNode, firstNode } from './screens.js';
+import { drawInventory, drawPerks, moveNode, firstNode, WORN_SLOTS } from './screens.js';
+const WORN = WORN_SLOTS.length;
 import { treesFor } from '../shared/perks.js';
 import { Host, joinAsGuest, socketTransport, makeCode, friendlyError } from './peer.js';
 
@@ -247,8 +248,10 @@ function invKeys(ev) {
   const rows = Math.max(1, Math.ceil(bag.length / 8));
   const move = (dx, dy) => {
     if (invUi.cursor < 0) {
-      if (dy > 0) invUi.cursor = invUi.cursor === -1 ? -2 : 0;
-      else if (dy < 0) invUi.cursor = invUi.cursor === -2 ? -1 : (rows - 1) * 8;
+      // walking down the four worn slots, then back into the pack
+      const n = -1 - invUi.cursor;
+      if (dy > 0) invUi.cursor = n < WORN - 1 ? -(n + 2) : 0;
+      else if (dy < 0) invUi.cursor = n > 0 ? -n : (rows - 1) * 8;
       else if (dx < 0) invUi.cursor = 7;
       return;
     }
@@ -267,7 +270,7 @@ function invKeys(ev) {
     case 'up': move(0, -1); audio.sfx('menu'); break;
     case 'down': move(0, 1); audio.sfx('menu'); break;
     case 'start': case 'a':
-      if (invUi.cursor < 0) net.invOp('unequip', invUi.cursor === -1 ? 0 : 1);
+      if (invUi.cursor < 0) net.invOp('unequip', -1 - invUi.cursor);
       else net.invOp('use', invUi.cursor);
       audio.sfx('select');
       break;
